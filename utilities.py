@@ -52,6 +52,10 @@ def _getDistance(positions,index_position=None):
            
     return distance
 
+def _getNeuronIndex(data, neuron_group, position=0+0j):
+    neuron_index=data['positions_all']['w_coord'][neuron_group].index(position)
+    return neuron_index
+
 def getLambda(D,MF):
     # Length constant according to Schwabe et al J Neurosci 2006
     # D is diameter of mean axonal length in mm along cx.
@@ -172,13 +176,18 @@ def _newest(path='./',type='connections'):
     # type = {'connections','results'}
     files = [f for f in os.listdir(path) if type in f]
     paths = [os.path.join(path, basename) for basename in files]
-    return max(paths, key=os.path.getctime)
+    filename = max(paths, key=os.path.getctime)
+    fullfile = os.path.join(path,filename)
+    return fullfile
 
-def showLatestConnections(path='./', hist_from=None):
+def showLatestConnections(path='./',filename=None, hist_from=None):
 
-    latest_filename = _newest(path, type='connections')
-    print(latest_filename)
-    data = getData(latest_filename)
+    if filename is None:
+        filename = _newest(path,type='connections')
+    else:
+        filename = os.path.join(path, filename)
+    print(filename)
+    data = getData(filename)
 
     # Visualize
     # Extract connections from data dict
@@ -229,7 +238,9 @@ def showLatestVm(path='./',filename=None):
         N_neurons = len(data['positions_all']['w_coord'][results])
         # If all neurons are monitored, show center and it's neighborghs, otherwise, show all.
         if N_monitored_neurons == N_neurons: 
-            neuron_index_center=data['positions_all']['w_coord'][results].index(0+0j)
+            # neuron_index_center=data['positions_all']['w_coord'][results].index(0+0j)
+            neuron_index_center = _getNeuronIndex(data, results, position=0+0j)
+            
             im = ax.plot(t[time_interval[0]:time_interval[1]], 
                         data['vm_all'][results]['vm'][time_interval[0]:time_interval[1],
                         neuron_index_center-1:neuron_index_center+2])
@@ -319,7 +330,8 @@ def showLatestI(path='./',filename=None):
         I_total = gl * (El - vm) + ge * (Ee - vm) + gi * (Ei - vm)
 
         if N_monitored_neurons == N_neurons: 
-            neuron_index_center=data['positions_all']['w_coord'][results_vm].index(0+0j)
+            # neuron_index_center=data['positions_all']['w_coord'][results_vm].index(0+0j)
+            neuron_index_center = _getNeuronIndex(data, results_vm, position=0+0j)
             ax.plot(t[time_interval[0]:time_interval[1]], 
                         I_total[time_interval[0]:time_interval[1],
                         neuron_index_center])
@@ -410,65 +422,91 @@ def showLatestASF(path='./',timestamp=None,sum_length=None):
     # list all files with the timestamp
     all_files = os.listdir(path)
     files_correct_timestamp = [files for files in all_files if timestamp in files]
-    # skip metadata, get other filenames
+    # skip metadata and connections files, get other filenames
     result_files_for_ASF_step1 = [files for files in files_correct_timestamp if 'metadata' not in files]
     result_files_for_ASF = [files for files in result_files_for_ASF_step1 if 'connections' not in files]
-    pdb.set_trace()
-    # loop for data
-    # get spike frequencies for center, accept sum_length
-    # visualize        
-    TÄHÄN JÄIT: TEE ASF DATOISTA
-    print(filename)
-    data = getData(filename)
 
-    # Visualize
+    # Sort the result files to increasing center size
+    # pick str btw 'act' and '-1.gz', eval the difference, multiply by -1 to get it positive
+    filename_dict = {k:-1 * eval(k[k.find('act') + 3 : k.find('-1.gz')]) for k in result_files_for_ASF}
+    # sort according to diff
+    filename_dict_sorted = sorted(filename_dict,key=filename_dict.get)
+    ASF_x_axis_values = sorted(filename_dict.values())
+   
     coords='w_coord'
-    # Extract connections from data dict
-    list_of_results = [n for n in data['spikes_all'].keys() if 'NG' in n]
+    if sum_length is None:
+        sum_length = 3 # How many neurons to sum together
 
-    print(list_of_results)
+    # Get neuron group names and init ASF_dict
+    data = getData(result_files_for_ASF[0])
+    list_of_results = [n for n in data['spikes_all'].keys() if 'NG' in n]
+    ASF_dict = {k:[] for k in list_of_results}
+
+    # Loop for data
+    for filename in filename_dict_sorted:
+        print(f'Get {filename}')
+        data = getData(filename)
+
+        # For each neuron group, get spike frequencies for neurons of interest, accept sum_length
+        for neuron_group in list_of_results:
+            # Pick center idx
+            center_index = _getNeuronIndex(data, neuron_group, position=0+0j)
+            neuron_indices = np.arange(center_index - np.floor(sum_length/2), center_index + np.ceil(sum_length/2)).astype('int')
+            # Select data, add to nd array
+            full_vector=data['spikes_all'][neuron_group]['count'].astype('float64')
+            firing_frequency = np.mean(full_vector[neuron_indices])
+            ASF_dict[neuron_group].append(firing_frequency)
+    
+    # Visualize
+
     n_images=len(list_of_results)
     n_columns = 2
-    ylims=np.array([-18.4,18.4])
+    # ylims=np.array([-18.4,18.4])
     n_rows = int(np.ceil(n_images/n_columns))
 
+    # ASF is defined for center receptive field. I leave here the option to show the
+    # spatial dimension in the second subplot, including eg the parameters of DoG fit
+    # along space. This gives us reflection of the FB in case the HO model is not perfect.
     width_ratios = np.array([3,1,3,1])
     fig, axs = plt.subplots(n_rows, n_columns * 2, gridspec_kw={'width_ratios': width_ratios})
     axs = axs.flat
     # flat_list_of_results = [item for sublist in list_of_results for item in sublist]
+    # pdb.set_trace()
 
     # Spikes
-    for ax1, results in zip(axs[0:-1:2],list_of_results):
-        # im = ax1.scatter(data['spikes_all'][results]['t'], data['spikes_all'][results]['i'],s=1)
-        position_idxs=data['spikes_all'][results]['i']
-        im = ax1.scatter(   data['spikes_all'][results]['t'], 
-                            np.real(data['positions_all'][coords][results])[position_idxs],
-                            s=1)
-        ax1.set_ylim(ylims)
-        ax1.set_title(results, fontsize=10)
-    # Summary histograms
-    for ax2, results in zip(axs[1:-1:2],list_of_results):
+    for ax1, neuron_group in zip(axs[0:-1:2],list_of_results):
+        ax1.plot(ASF_x_axis_values,ASF_dict[neuron_group])
+
+    # for ax1, results in zip(axs[0:-1:2],list_of_results):
         # position_idxs=data['spikes_all'][results]['i']
-        #Rearrange and sum neurons in sum_length bin width
-        if sum_length is None:
-            sum_length = 3 # How many neurons to sum together
-        full_vector=data['spikes_all'][results]['count'].astype('float64')
-        necessary_length = int(np.ceil(len(full_vector)/sum_length)) * sum_length
-        n_zeros = necessary_length - len(full_vector)
-        full_vector_padded = np.pad(full_vector, (0, n_zeros), 'constant', constant_values=(np.NaN, np.NaN))
-        rearranged_data = np.reshape(full_vector_padded,[sum_length, int(necessary_length/sum_length) ], order='F')
-        summed_rearranged_data = np.nansum(rearranged_data, axis=0)
-        full_vector_pos = np.real(data['positions_all'][coords][results])
-        full_vector_pos_padded = np.pad(full_vector_pos, (0, n_zeros), 'constant', constant_values=(np.NaN, np.NaN))
-        rearranged_pos = np.reshape(full_vector_pos_padded,[sum_length, int(necessary_length/sum_length) ], order='F')
-        mean_rearranged_pos = np. nanmean(rearranged_pos, axis=0)
+        # im = ax1.scatter(   data['spikes_all'][results]['t'], 
+        #                     np.real(data['positions_all'][coords][results])[position_idxs],
+        #                     s=1)
+        # ax1.set_ylim(ylims)
+        ax1.set_title(neuron_group, fontsize=10)
+    # # Summary histograms
+    # for ax2, results in zip(axs[1:-1:2],list_of_results):
+    #     # position_idxs=data['spikes_all'][results]['i']
+    #     #Rearrange and sum neurons in sum_length bin width
+    #     if sum_length is None:
+    #         sum_length = 3 # How many neurons to sum together
+    #     full_vector=data['spikes_all'][results]['count'].astype('float64')
+    #     necessary_length = int(np.ceil(len(full_vector)/sum_length)) * sum_length
+    #     n_zeros = necessary_length - len(full_vector)
+    #     full_vector_padded = np.pad(full_vector, (0, n_zeros), 'constant', constant_values=(np.NaN, np.NaN))
+    #     rearranged_data = np.reshape(full_vector_padded,[sum_length, int(necessary_length/sum_length) ], order='F')
+    #     summed_rearranged_data = np.nansum(rearranged_data, axis=0)
+    #     full_vector_pos = np.real(data['positions_all'][coords][results])
+    #     full_vector_pos_padded = np.pad(full_vector_pos, (0, n_zeros), 'constant', constant_values=(np.NaN, np.NaN))
+    #     rearranged_pos = np.reshape(full_vector_pos_padded,[sum_length, int(necessary_length/sum_length) ], order='F')
+    #     mean_rearranged_pos = np. nanmean(rearranged_pos, axis=0)
 
-        firing_frequency = summed_rearranged_data / (sum_length * data['runtime'])
+    #     firing_frequency = summed_rearranged_data / (sum_length * data['runtime'])
 
-        pos = mean_rearranged_pos
-        im = ax2.barh(pos, firing_frequency, height=1.0)
-        ax2.set_ylim(ylims)
-        # ax2.axes.get_yaxis().set_visible(False)
+    #     pos = mean_rearranged_pos
+    #     im = ax2.barh(pos, firing_frequency, height=1.0)
+    #     ax2.set_ylim(ylims)
+    #     # ax2.axes.get_yaxis().set_visible(False)
 
     # Shut down last pair if uneven n images
     if np.mod(n_images,2):
