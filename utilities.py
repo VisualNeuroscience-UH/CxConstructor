@@ -409,7 +409,7 @@ def showLatestSpatial(path='./',filename=None,sum_length=None):
         axs[-1].axis('off')
     plt.show()
 
-def showLatestASF(path='./',timestamp=None,sum_length=None):
+def showLatestASF(path='./',timestamp=None,sum_length=3):
     
     if timestamp is None:
         filename = _newest(path,type='results')
@@ -427,16 +427,18 @@ def showLatestASF(path='./',timestamp=None,sum_length=None):
     result_files_for_ASF = [files for files in result_files_for_ASF_step1 if 'connections' not in files]
 
     # Sort the result files to increasing center size
+    # Test if multiple trials per run, ie the padded zeors
+    # If yes, take metadata for filenames
+    # flag multiple trials per run
+
     # pick str btw 'act' and '-1.gz', eval the difference, multiply by -1 to get it positive
     filename_dict = {k:-1 * eval(k[k.find('act') + 3 : k.find('-1.gz')]) for k in result_files_for_ASF}
     # sort according to diff
     filename_dict_sorted = sorted(filename_dict,key=filename_dict.get)
     ASF_x_axis_values = sorted(filename_dict.values())
-   
+    pdb.set_trace()
     coords='w_coord'
-    if sum_length is None:
-        sum_length = 3 # How many neurons to sum together
-
+ 
     # Get neuron group names and init ASF_dict
     data = getData(result_files_for_ASF[0])
     list_of_results = [n for n in data['spikes_all'].keys() if 'NG' in n]
@@ -455,6 +457,9 @@ def showLatestASF(path='./',timestamp=None,sum_length=None):
             # Select data, add to nd array
             full_vector=data['spikes_all'][neuron_group]['count'].astype('float64')
             firing_frequency = np.mean(full_vector[neuron_indices])
+
+            # get flag metadata/multiple trials per run. Create 2 dim list or 
+
             ASF_dict[neuron_group].append(firing_frequency)
     
     # Visualize
