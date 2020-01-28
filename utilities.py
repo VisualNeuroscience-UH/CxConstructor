@@ -7,6 +7,7 @@ import os
 from cxsystem2.core.tools import write_to_file as wtf
 from brian2.units import *
 import datetime
+import pandas as pd
 import pdb
 
 def getData(filename):
@@ -427,26 +428,42 @@ def showLatestASF(path='./',timestamp=None,sum_length=3):
     result_files_for_ASF = [files for files in result_files_for_ASF_step1 if 'connections' not in files]
 
     # Sort the result files to increasing center size
-    # Test if multiple trials per run, ie the padded zeors
-    # If yes, take metadata for filenames
-    # flag multiple trials per run
+    metadata_file = [files for files in files_correct_timestamp if 'metadata' in files]
+    assert len(metadata_file)<=1, "Multiple metadatafiles, don't know what to do, aborting"
+    assert len(metadata_file)==1, "No metadatafile, cannot do ASF from single file, or from different runs"
+    metadata_df=getData(metadata_file[0])
 
-    # pick str btw 'act' and '-1.gz', eval the difference, multiply by -1 to get it positive
-    filename_dict = {k:-1 * eval(k[k.find('act') + 3 : k.find('-1.gz')]) for k in result_files_for_ASF}
-    # sort according to diff
-    filename_dict_sorted = sorted(filename_dict,key=filename_dict.get)
-    ASF_x_axis_values = sorted(filename_dict.values())
-    pdb.set_trace()
+    # Test if multiple trials per run
+    # Number of files / Number of unique parameters
+    trials_per_config =  int(metadata_df['Full path'].size / metadata_df['Dimension-1 Value'].unique().size)
+
+    assert 'act' in result_files_for_ASF[0], 'I was expecting "act" in filename. This might not be ASF data, aborting'
+    
+    if trials_per_config==1:
+        # Get ASF sizes from filenames: pick str btw 'act' and '-1', eval the difference, multiply by -1 to get it positive
+        filename_dict = {k:-1 * eval(k[k.find('act') + 3 : k.find('-1.gz')]) for k in result_files_for_ASF}
+    elif trials_per_config>1:
+        filename_dict = {k:-1 * eval(k[k.find('act') + 3 : k.find('-1_')]) for k in result_files_for_ASF}
+
+    filename_array_sorted = metadata_df['Full path'].values
+
+    # Get unique size values with set command
+    ASF_x_axis_values = sorted(set(filename_dict.values()))
     coords='w_coord'
  
-    # Get neuron group names and init ASF_dict
+    # Get neuron group names and init ASF_dicts
     data = getData(result_files_for_ASF[0])
     list_of_results = [n for n in data['spikes_all'].keys() if 'NG' in n]
-    ASF_dict = {k:[] for k in list_of_results}
+    # ASF_dict = {k:[] for k in list_of_results}
+    ASF_dict = {k:np.zeros([len(ASF_x_axis_values),trials_per_config]) for k in list_of_results}
+    # ASF_dict_mean = {k:[] for k in list_of_results}
 
     # Loop for data
-    for filename in filename_dict_sorted:
-        print(f'Get {filename}')
+    trial = 0
+    size = 0
+    # for filename in filename_dict_sorted:
+    for filename in filename_array_sorted:
+        # print(f'Get {filename}')
         data = getData(filename)
 
         # For each neuron group, get spike frequencies for neurons of interest, accept sum_length
@@ -460,8 +477,12 @@ def showLatestASF(path='./',timestamp=None,sum_length=3):
 
             # get flag metadata/multiple trials per run. Create 2 dim list or 
 
-            ASF_dict[neuron_group].append(firing_frequency)
-    
+            # ASF_dict[neuron_group].append(firing_frequency)
+            ASF_dict[neuron_group][size,trial] = firing_frequency
+        trial += 1
+        if trial == trials_per_config: 
+            trial = 0; size += 1
+
     # Visualize
 
     n_images=len(list_of_results)
@@ -476,11 +497,11 @@ def showLatestASF(path='./',timestamp=None,sum_length=3):
     fig, axs = plt.subplots(n_rows, n_columns * 2, gridspec_kw={'width_ratios': width_ratios})
     axs = axs.flat
     # flat_list_of_results = [item for sublist in list_of_results for item in sublist]
-    # pdb.set_trace()
 
     # Spikes
     for ax1, neuron_group in zip(axs[0:-1:2],list_of_results):
-        ax1.plot(ASF_x_axis_values,ASF_dict[neuron_group])
+        ax1.plot(ASF_x_axis_values,ASF_dict[neuron_group], 'k', linewidth=0.5, alpha=0.1)
+        ax1.plot(ASF_x_axis_values,ASF_dict[neuron_group].mean(axis=1), 'k', linewidth=2)
 
     # for ax1, results in zip(axs[0:-1:2],list_of_results):
         # position_idxs=data['spikes_all'][results]['i']
