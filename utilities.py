@@ -433,9 +433,14 @@ def showLatestASF(path='./',timestamp=None,sum_length=3):
     assert len(metadata_file)==1, "No metadatafile, cannot do ASF from single file, or from different runs"
     metadata_df=getData(metadata_file[0])
 
-    # Test if multiple trials per run
+    # Test if multiple trials per run and one or two dimensions (first is always ASF size)
     # Number of files / Number of unique parameters
-    trials_per_config =  int(metadata_df['Full path'].size / metadata_df['Dimension-1 Value'].unique().size)
+    assert 'Dimension-3 Value' not in metadata_df.keys(), 'Cannot handle more than 2 dims for one ASF analysis, aborting'
+    if 'Dimension-2 Value' in metadata_df.keys():
+        print('\nTwo-dimensional array run')
+
+    else:
+        trials_per_config =  int(metadata_df['Full path'].size / metadata_df['Dimension-1 Value'].unique().size)
 
     assert 'act' in result_files_for_ASF[0], 'I was expecting "act" in filename. This might not be ASF data, aborting'
     
@@ -454,16 +459,13 @@ def showLatestASF(path='./',timestamp=None,sum_length=3):
     # Get neuron group names and init ASF_dicts
     data = getData(result_files_for_ASF[0])
     list_of_results = [n for n in data['spikes_all'].keys() if 'NG' in n]
-    # ASF_dict = {k:[] for k in list_of_results}
     ASF_dict = {k:np.zeros([len(ASF_x_axis_values),trials_per_config]) for k in list_of_results}
-    # ASF_dict_mean = {k:[] for k in list_of_results}
-
+    pdb.set_trace()
     # Loop for data
     trial = 0
     size = 0
     # for filename in filename_dict_sorted:
     for filename in filename_array_sorted:
-        # print(f'Get {filename}')
         data = getData(filename)
 
         # For each neuron group, get spike frequencies for neurons of interest, accept sum_length
@@ -475,9 +477,7 @@ def showLatestASF(path='./',timestamp=None,sum_length=3):
             full_vector=data['spikes_all'][neuron_group]['count'].astype('float64')
             firing_frequency = np.mean(full_vector[neuron_indices])
 
-            # get flag metadata/multiple trials per run. Create 2 dim list or 
-
-            # ASF_dict[neuron_group].append(firing_frequency)
+            # get flag metadata/multiple trials per run. Get 2 dim data 
             ASF_dict[neuron_group][size,trial] = firing_frequency
         trial += 1
         if trial == trials_per_config: 
@@ -487,7 +487,6 @@ def showLatestASF(path='./',timestamp=None,sum_length=3):
 
     n_images=len(list_of_results)
     n_columns = 2
-    # ylims=np.array([-18.4,18.4])
     n_rows = int(np.ceil(n_images/n_columns))
 
     # ASF is defined for center receptive field. I leave here the option to show the
@@ -496,19 +495,12 @@ def showLatestASF(path='./',timestamp=None,sum_length=3):
     width_ratios = np.array([3,1,3,1])
     fig, axs = plt.subplots(n_rows, n_columns * 2, gridspec_kw={'width_ratios': width_ratios})
     axs = axs.flat
-    # flat_list_of_results = [item for sublist in list_of_results for item in sublist]
 
     # Spikes
     for ax1, neuron_group in zip(axs[0:-1:2],list_of_results):
         ax1.plot(ASF_x_axis_values,ASF_dict[neuron_group], 'k', linewidth=0.5, alpha=0.1)
         ax1.plot(ASF_x_axis_values,ASF_dict[neuron_group].mean(axis=1), 'k', linewidth=2)
 
-    # for ax1, results in zip(axs[0:-1:2],list_of_results):
-        # position_idxs=data['spikes_all'][results]['i']
-        # im = ax1.scatter(   data['spikes_all'][results]['t'], 
-        #                     np.real(data['positions_all'][coords][results])[position_idxs],
-        #                     s=1)
-        # ax1.set_ylim(ylims)
         ax1.set_title(neuron_group, fontsize=10)
     # # Summary histograms
     # for ax2, results in zip(axs[1:-1:2],list_of_results):
