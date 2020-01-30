@@ -353,7 +353,7 @@ def showLatestSpatial(path='./',filename=None,sum_length=None):
     if filename is None:
         filename = _newest(path,type='results')
     print(filename)
-    data = getData(filename)
+    data = getData(os.path.join(path, filename))
 
     # Visualize
     coords='w_coord'
@@ -411,7 +411,12 @@ def showLatestSpatial(path='./',filename=None,sum_length=None):
     plt.show()
 
 def showLatestASF(path='./',timestamp=None,sum_length=3):
-    
+    '''
+    Show ASF curves for single value or for an array search across one independent variable.
+    At the moment, no more than 1000 values are adviced for one search,
+    e.g. with 20 trials per run and 10 ASF sized this means 5 values for the array of independent variable.
+    Dimensions are (ASF_size, search_variable, trial)
+    '''
     if timestamp is None:
         filename = _newest(path,type='results')
         today = str(datetime.date.today()).replace('-','')
@@ -431,15 +436,23 @@ def showLatestASF(path='./',timestamp=None,sum_length=3):
     metadata_file = [files for files in files_correct_timestamp if 'metadata' in files]
     assert len(metadata_file)<=1, "Multiple metadatafiles, don't know what to do, aborting"
     assert len(metadata_file)==1, "No metadatafile, cannot do ASF from single file, or from different runs"
-    metadata_df=getData(metadata_file[0])
+    metadata_df=getData(os.path.join(path, metadata_file[0]))
 
     # Test if multiple trials per run and one or two dimensions (first is always ASF size)
-    # Number of files / Number of unique parameters
+    # trials_per_config = Number of files / Number of unique parameters
     assert 'Dimension-3 Value' not in metadata_df.keys(), 'Cannot handle more than 2 dims for one ASF analysis, aborting'
+    ASF_array_length = metadata_df['Dimension-1 Value'].unique().size
     if 'Dimension-2 Value' in metadata_df.keys():
         print('\nTwo-dimensional array run')
-
+        search_variable_name = metadata_df['Dimension-2 Parameter'].unique()[0]
+        search_variable_array = metadata_df['Dimension-2 Value'].unique()
+        search_variable_array_length = search_variable_array.size
+        trials_per_config =  int(   metadata_df['Full path'].size /    
+                                    (ASF_array_length * search_variable_array_length))
     else:
+        search_variable_name = 'no'
+        search_variable_array = ['--']
+        search_variable_array_length = 1
         trials_per_config =  int(metadata_df['Full path'].size / metadata_df['Dimension-1 Value'].unique().size)
 
     assert 'act' in result_files_for_ASF[0], 'I was expecting "act" in filename. This might not be ASF data, aborting'
@@ -452,18 +465,21 @@ def showLatestASF(path='./',timestamp=None,sum_length=3):
 
     filename_array_sorted = metadata_df['Full path'].values
 
-    # Get unique size values with set command
+    # Get unique ASF_size values with set command
     ASF_x_axis_values = sorted(set(filename_dict.values()))
+
     coords='w_coord'
- 
+
     # Get neuron group names and init ASF_dicts
-    data = getData(result_files_for_ASF[0])
+    data = getData(os.path.join(path, result_files_for_ASF[0]))
     list_of_results = [n for n in data['spikes_all'].keys() if 'NG' in n]
-    ASF_dict = {k:np.zeros([len(ASF_x_axis_values),trials_per_config]) for k in list_of_results}
-    pdb.set_trace()
+    ASF_dict = {k:np.zeros([ASF_array_length,search_variable_array_length, trials_per_config]) for k in list_of_results}
+    
     # Loop for data
     trial = 0
-    size = 0
+    search_variable = 0
+    ASF_size = 0
+
     # for filename in filename_dict_sorted:
     for filename in filename_array_sorted:
         data = getData(filename)
@@ -478,58 +494,71 @@ def showLatestASF(path='./',timestamp=None,sum_length=3):
             firing_frequency = np.mean(full_vector[neuron_indices])
 
             # get flag metadata/multiple trials per run. Get 2 dim data 
-            ASF_dict[neuron_group][size,trial] = firing_frequency
+            ASF_dict[neuron_group][ASF_size, search_variable, trial] = firing_frequency
         trial += 1
         if trial == trials_per_config: 
-            trial = 0; size += 1
+            trial = 0; search_variable += 1
+        if search_variable == search_variable_array_length: 
+            search_variable = 0; ASF_size += 1
 
     # Visualize
-
     n_images=len(list_of_results)
     n_columns = 2
     n_rows = int(np.ceil(n_images/n_columns))
+    
+    # Enable interactive mode, ie don't block ipython with plt.show()
+    plt.ion() 
 
     # ASF is defined for center receptive field. I leave here the option to show the
     # spatial dimension in the second subplot, including eg the parameters of DoG fit
     # along space. This gives us reflection of the FB in case the HO model is not perfect.
     width_ratios = np.array([3,1,3,1])
-    fig, axs = plt.subplots(n_rows, n_columns * 2, gridspec_kw={'width_ratios': width_ratios})
-    axs = axs.flat
 
-    # Spikes
-    for ax1, neuron_group in zip(axs[0:-1:2],list_of_results):
-        ax1.plot(ASF_x_axis_values,ASF_dict[neuron_group], 'k', linewidth=0.5, alpha=0.1)
-        ax1.plot(ASF_x_axis_values,ASF_dict[neuron_group].mean(axis=1), 'k', linewidth=2)
+    # Loop for 2nd dim, ie for the primary independent search variable; the ASF is fixed
+    # One figure for one search variable value
+    for search_variable_index in np.arange(search_variable_array_length):
+        fig, axs = plt.subplots(n_rows, n_columns * 2, gridspec_kw={'width_ratios': width_ratios}, num=search_variable_index)
+        fig.suptitle(f'Searching for {search_variable_name} parameter, value {search_variable_array[search_variable_index]}', fontsize=16)
+        axs = axs.flat
 
-        ax1.set_title(neuron_group, fontsize=10)
-    # # Summary histograms
-    # for ax2, results in zip(axs[1:-1:2],list_of_results):
-    #     # position_idxs=data['spikes_all'][results]['i']
-    #     #Rearrange and sum neurons in sum_length bin width
-    #     if sum_length is None:
-    #         sum_length = 3 # How many neurons to sum together
-    #     full_vector=data['spikes_all'][results]['count'].astype('float64')
-    #     necessary_length = int(np.ceil(len(full_vector)/sum_length)) * sum_length
-    #     n_zeros = necessary_length - len(full_vector)
-    #     full_vector_padded = np.pad(full_vector, (0, n_zeros), 'constant', constant_values=(np.NaN, np.NaN))
-    #     rearranged_data = np.reshape(full_vector_padded,[sum_length, int(necessary_length/sum_length) ], order='F')
-    #     summed_rearranged_data = np.nansum(rearranged_data, axis=0)
-    #     full_vector_pos = np.real(data['positions_all'][coords][results])
-    #     full_vector_pos_padded = np.pad(full_vector_pos, (0, n_zeros), 'constant', constant_values=(np.NaN, np.NaN))
-    #     rearranged_pos = np.reshape(full_vector_pos_padded,[sum_length, int(necessary_length/sum_length) ], order='F')
-    #     mean_rearranged_pos = np. nanmean(rearranged_pos, axis=0)
+        # Spikes
+        for ax1, neuron_group in zip(axs[0:-1:2],list_of_results):
+            # pick data
+            data_to_plot = np.squeeze(ASF_dict[neuron_group][:,search_variable_index,:])
+            data_to_plot_mean = data_to_plot.mean(axis=1)
+            # plot
+            ax1.plot(ASF_x_axis_values,data_to_plot, 'k', linewidth=0.5, alpha=0.1)
+            ax1.plot(ASF_x_axis_values,data_to_plot_mean, 'k', linewidth=2)
 
-    #     firing_frequency = summed_rearranged_data / (sum_length * data['runtime'])
+            ax1.set_title(neuron_group, fontsize=10)
+        # # Summary histograms
+        # for ax2, results in zip(axs[1:-1:2],list_of_results):
+        #     # position_idxs=data['spikes_all'][results]['i']
+        #     #Rearrange and sum neurons in sum_length bin width
+        #     if sum_length is None:
+        #         sum_length = 3 # How many neurons to sum together
+        #     full_vector=data['spikes_all'][results]['count'].astype('float64')
+        #     necessary_length = int(np.ceil(len(full_vector)/sum_length)) * sum_length
+        #     n_zeros = necessary_length - len(full_vector)
+        #     full_vector_padded = np.pad(full_vector, (0, n_zeros), 'constant', constant_values=(np.NaN, np.NaN))
+        #     rearranged_data = np.reshape(full_vector_padded,[sum_length, int(necessary_length/sum_length) ], order='F')
+        #     summed_rearranged_data = np.nansum(rearranged_data, axis=0)
+        #     full_vector_pos = np.real(data['positions_all'][coords][results])
+        #     full_vector_pos_padded = np.pad(full_vector_pos, (0, n_zeros), 'constant', constant_values=(np.NaN, np.NaN))
+        #     rearranged_pos = np.reshape(full_vector_pos_padded,[sum_length, int(necessary_length/sum_length) ], order='F')
+        #     mean_rearranged_pos = np. nanmean(rearranged_pos, axis=0)
 
-    #     pos = mean_rearranged_pos
-    #     im = ax2.barh(pos, firing_frequency, height=1.0)
-    #     ax2.set_ylim(ylims)
-    #     # ax2.axes.get_yaxis().set_visible(False)
+        #     firing_frequency = summed_rearranged_data / (sum_length * data['runtime'])
 
-    # Shut down last pair if uneven n images
-    if np.mod(n_images,2):
-        axs[-2].axis('off')
-        axs[-1].axis('off')
+        #     pos = mean_rearranged_pos
+        #     im = ax2.barh(pos, firing_frequency, height=1.0)
+        #     ax2.set_ylim(ylims)
+        #     # ax2.axes.get_yaxis().set_visible(False)
+
+        # Shut down last pair if uneven n images
+        if np.mod(n_images,2):
+            axs[-2].axis('off')
+            axs[-1].axis('off')
     plt.show()
 
 def createASFset(start_stim_radius=0.1,end_stim_radius=8,units='deg',Nsteps=5,show_positions=True):
