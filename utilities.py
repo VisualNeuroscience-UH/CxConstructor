@@ -178,8 +178,9 @@ def _newest(path='./',type='connections'):
     files = [f for f in os.listdir(path) if type in f]
     paths = [os.path.join(path, basename) for basename in files]
     filename = max(paths, key=os.path.getctime)
-    fullfile = os.path.join(path,filename)
-    return fullfile
+    # fullfile = os.path.join(path,filename)
+    # return fullfile
+    return filename
 
 def showLatestConnections(path='./',filename=None, hist_from=None):
 
@@ -229,7 +230,8 @@ def showLatestVm(path='./',filename=None):
     n_rows = int(np.ceil(n_images/n_columns))
 
     t=data['vm_all'][list_of_results[0]]['t']
-    time_interval=[2000, 4000]
+    # time_interval=[2000, 4000]
+    time_interval=[0, 2000]
 
     fig, axs = plt.subplots(n_rows, n_columns)
     axs = axs.flat
@@ -348,7 +350,53 @@ def showLatestI(path='./',filename=None):
 
     plt.show()
 
-def showLatestSpatial(path='./',filename=None,sum_length=None):
+def getI(neuron_group,data):
+
+    # Extract connections from data dict
+    # list_of_results_ge = [n for n in data['ge_soma_all'].keys() if 'NG' in n]
+    # list_of_results_gi = [n for n in data['gi_soma_all'].keys() if 'NG' in n]
+    # list_of_results_vm = [n for n in data['vm_all'].keys() if 'NG' in n]
+    list_of_results_ge = [n for n in data['ge_soma_all'].keys() if neuron_group in n]
+    list_of_results_gi = [n for n in data['gi_soma_all'].keys() if neuron_group in n]
+    list_of_results_vm = [n for n in data['vm_all'].keys() if neuron_group in n]
+    assert list_of_results_ge == list_of_results_gi == list_of_results_vm, "different N neuron groups monitored, can not calculate current, aborting..."
+
+    if len(list_of_results_ge)==0:
+        #No currents monitored for thir group
+        I_total_mean = 0 # to avoid stupid error later
+        I_excitatory_mean = 0
+        I_inhibitory_mean = 0
+        return I_total_mean, I_excitatory_mean, I_inhibitory_mean
+    # These data are available in physiology_configuration file (inside results datafile), but hard coded here for the time being
+    El = -65 * mV
+    gl = 50 * nS
+    Ee = 0 * mV
+    Ei = -75 * mV
+
+    time_interval=[2000, 4000]
+
+    for results_ge, results_gi, results_vm in zip(  list_of_results_ge, \
+                                                        list_of_results_gi,list_of_results_vm):
+
+        N_monitored_neurons = data['vm_all'][results_vm]['vm'].shape[1]
+        N_neurons = len(data['positions_all']['w_coord'][results_vm])
+
+        ge= data['ge_soma_all'][results_ge]['ge_soma']
+        gi= data['gi_soma_all'][results_gi]['gi_soma']
+        vm= data['vm_all'][results_vm]['vm']
+        I_total = gl * (El - vm) + ge * (Ee - vm) + gi * (Ei - vm)
+        I_excitatory = ge * (Ee - vm)
+        I_inhibitory = gi * (Ei - vm)
+
+        if N_monitored_neurons == N_neurons: 
+            neuron_index_center = _getNeuronIndex(data, results_vm, position=0+0j)
+        I_total_mean = np.mean(I_total[time_interval[0]:time_interval[1]] / namp)
+        I_excitatory_mean = np.mean(I_excitatory[time_interval[0]:time_interval[1]] / namp)
+        I_inhibitory_mean = np.mean(I_inhibitory[time_interval[0]:time_interval[1]] / namp)
+        
+    return I_total_mean, I_excitatory_mean, I_inhibitory_mean
+
+def showLatestSpatial(path='./',filename=None,sum_length=1):
 
     if filename is None:
         filename = _newest(path,type='results')
@@ -410,13 +458,16 @@ def showLatestSpatial(path='./',filename=None,sum_length=None):
         axs[-1].axis('off')
     plt.show()
 
-def showLatestASF(path='./',timestamp=None,sum_length=3):
+def showLatestASF(path='./',timestamp=None,sum_length=1, fixed_y_scale=True, data_type='spikes'):
     '''
     Show ASF curves for single value or for an array search across one independent variable.
     At the moment, no more than 1000 values are adviced for one search,
     e.g. with 20 trials per run and 10 ASF sized this means 5 values for the array of independent variable.
     Dimensions are (ASF_size, search_variable, trial)
     '''
+    
+    assert data_type=='spikes' or data_type=='current', "Unknown data type, should be 'spikes' or 'current', aborting"
+    
     if timestamp is None:
         filename = _newest(path,type='results')
         today = str(datetime.date.today()).replace('-','')
@@ -473,8 +524,11 @@ def showLatestASF(path='./',timestamp=None,sum_length=3):
     # Get neuron group names and init ASF_dicts
     data = getData(os.path.join(path, result_files_for_ASF[0]))
     list_of_results = [n for n in data['spikes_all'].keys() if 'NG' in n]
-    ASF_dict = {k:np.zeros([ASF_array_length,search_variable_array_length, trials_per_config]) for k in list_of_results}
-    
+    if data_type == 'spikes':
+        ASF_dict = {k:np.zeros([ASF_array_length,search_variable_array_length, trials_per_config]) for k in list_of_results}
+    elif data_type == 'current':
+        ASF_dict = {k:np.zeros([ASF_array_length,search_variable_array_length, trials_per_config, 3]) for k in list_of_results}
+
     # Loop for data
     trial = 0
     search_variable = 0
@@ -483,18 +537,26 @@ def showLatestASF(path='./',timestamp=None,sum_length=3):
     # for filename in filename_dict_sorted:
     for filename in filename_array_sorted:
         data = getData(filename)
-
+        # print(f'I am happy for data {filename}')
         # For each neuron group, get spike frequencies for neurons of interest, accept sum_length
         for neuron_group in list_of_results:
             # Pick center idx
             center_index = _getNeuronIndex(data, neuron_group, position=0+0j)
             neuron_indices = np.arange(center_index - np.floor(sum_length/2), center_index + np.ceil(sum_length/2)).astype('int')
+            
             # Select data, add to nd array
-            full_vector=data['spikes_all'][neuron_group]['count'].astype('float64')
-            firing_frequency = np.mean(full_vector[neuron_indices])
+            if data_type == 'spikes':
+                full_vector=data['spikes_all'][neuron_group]['count'].astype('float64')
+                firing_frequency = np.mean(full_vector[neuron_indices])
+                ASF_dict[neuron_group][ASF_size, search_variable, trial] = firing_frequency
+            elif data_type == 'current':
+                I_total_mean, I_excitatory_mean, I_inhibitory_mean = getI(neuron_group, data)
+                ASF_dict[neuron_group][ASF_size, search_variable, trial, 0] = I_total_mean
+                ASF_dict[neuron_group][ASF_size, search_variable, trial, 1] = I_excitatory_mean
+                ASF_dict[neuron_group][ASF_size, search_variable, trial, 2] = I_inhibitory_mean *-1 ## Inverting inhibitory currents to positive
+
 
             # get flag metadata/multiple trials per run. Get 2 dim data 
-            ASF_dict[neuron_group][ASF_size, search_variable, trial] = firing_frequency
         trial += 1
         if trial == trials_per_config: 
             trial = 0; search_variable += 1
@@ -508,57 +570,59 @@ def showLatestASF(path='./',timestamp=None,sum_length=3):
     
     # Enable interactive mode, ie don't block ipython with plt.show()
     plt.ion() 
+    if data_type == 'spikes':
+        labels = ('firing_frequency')
+    elif data_type == 'current':
+        labels = ('I_total_mean', 'I_excitatory_mean','I_inhibitory_mean')
 
     # ASF is defined for center receptive field. I leave here the option to show the
     # spatial dimension in the second subplot, including eg the parameters of DoG fit
     # along space. This gives us reflection of the FB in case the HO model is not perfect.
-    width_ratios = np.array([3,1,3,1])
+    # width_ratios = np.array([3,1,3,1])
+    width_ratios = np.array([3,3])
+    if fixed_y_scale:
+        y_scales=dict(zip(list_of_results, [None]*len(list_of_results)))
+        for neuron_group in list_of_results:
+            y_max = np.max(ASF_dict[neuron_group])
+            # Get y_scales with 10% over max not to obliterate high values in the plot
+            y_scales[neuron_group] = y_max + np.ceil(y_max /  10) 
 
     # Loop for 2nd dim, ie for the primary independent search variable; the ASF is fixed
     # One figure for one search variable value
     for search_variable_index in np.arange(search_variable_array_length):
-        fig, axs = plt.subplots(n_rows, n_columns * 2, gridspec_kw={'width_ratios': width_ratios}, num=search_variable_index)
+        # fig, axs = plt.subplots(n_rows, n_columns * 2, gridspec_kw={'width_ratios': width_ratios}, num=search_variable_index)
+        fig, axs = plt.subplots(n_rows, n_columns, gridspec_kw={'width_ratios': width_ratios}, num=search_variable_index)
         fig.suptitle(f'Searching for {search_variable_name} parameter, value {search_variable_array[search_variable_index]}', fontsize=16)
         axs = axs.flat
 
         # Spikes
-        for ax1, neuron_group in zip(axs[0:-1:2],list_of_results):
+        # for ax1, neuron_group in zip(axs[0:-1:2],list_of_results):
+        for ax1, neuron_group in zip(axs,list_of_results):
             # pick data
             data_to_plot = np.squeeze(ASF_dict[neuron_group][:,search_variable_index,:])
-            data_to_plot_mean = data_to_plot.mean(axis=1)
+            if data_to_plot.ndim == 1:
+                data_to_plot_mean = data_to_plot
+            else:
+                data_to_plot_mean = np.squeeze(data_to_plot.mean(axis=1))
+
             # plot
-            ax1.plot(ASF_x_axis_values,data_to_plot, 'k', linewidth=0.5, alpha=0.1)
-            ax1.plot(ASF_x_axis_values,data_to_plot_mean, 'k', linewidth=2)
+            if data_to_plot_mean.ndim == 1:
+                ax1.plot(ASF_x_axis_values,data_to_plot, 'k', linewidth=0.5, alpha=0.1)
+                ax1.plot(ASF_x_axis_values,data_to_plot_mean, 'k', linewidth=2, label=labels)
+            else:
+                ax1.plot(ASF_x_axis_values,data_to_plot_mean, linewidth=2, label=labels)
 
+            if fixed_y_scale:
+                ax1.set_ylim(bottom=0, top=y_scales[neuron_group])
             ax1.set_title(neuron_group, fontsize=10)
-        # # Summary histograms
-        # for ax2, results in zip(axs[1:-1:2],list_of_results):
-        #     # position_idxs=data['spikes_all'][results]['i']
-        #     #Rearrange and sum neurons in sum_length bin width
-        #     if sum_length is None:
-        #         sum_length = 3 # How many neurons to sum together
-        #     full_vector=data['spikes_all'][results]['count'].astype('float64')
-        #     necessary_length = int(np.ceil(len(full_vector)/sum_length)) * sum_length
-        #     n_zeros = necessary_length - len(full_vector)
-        #     full_vector_padded = np.pad(full_vector, (0, n_zeros), 'constant', constant_values=(np.NaN, np.NaN))
-        #     rearranged_data = np.reshape(full_vector_padded,[sum_length, int(necessary_length/sum_length) ], order='F')
-        #     summed_rearranged_data = np.nansum(rearranged_data, axis=0)
-        #     full_vector_pos = np.real(data['positions_all'][coords][results])
-        #     full_vector_pos_padded = np.pad(full_vector_pos, (0, n_zeros), 'constant', constant_values=(np.NaN, np.NaN))
-        #     rearranged_pos = np.reshape(full_vector_pos_padded,[sum_length, int(necessary_length/sum_length) ], order='F')
-        #     mean_rearranged_pos = np. nanmean(rearranged_pos, axis=0)
-
-        #     firing_frequency = summed_rearranged_data / (sum_length * data['runtime'])
-
-        #     pos = mean_rearranged_pos
-        #     im = ax2.barh(pos, firing_frequency, height=1.0)
-        #     ax2.set_ylim(ylims)
-        #     # ax2.axes.get_yaxis().set_visible(False)
 
         # Shut down last pair if uneven n images
         if np.mod(n_images,2):
-            axs[-2].axis('off')
+            # axs[-2].axis('off')
             axs[-1].axis('off')
+
+        handles, foo = ax1.get_legend_handles_labels()
+        fig.legend(handles, labels, loc='lower right')
     plt.show()
 
 def createASFset(start_stim_radius=0.1,end_stim_radius=8,units='deg',Nsteps=5,show_positions=True):
@@ -589,7 +653,6 @@ def createASFset(start_stim_radius=0.1,end_stim_radius=8,units='deg',Nsteps=5,sh
     ASF_positions_dict={}
     for input_radius in input_radii:
         # Calculate rounded input radii for same positions as in V1
-        # pdb.set_trace()
         input_radius_match_V1 = np.ceil(input_radius / V1_distance_btw_neurons) * V1_distance_btw_neurons
         group_values=[  (V1_distance_btw_neurons,input_radius_match_V1), 
                         (V1_distance_btw_neurons,V1_outer_radius), 
