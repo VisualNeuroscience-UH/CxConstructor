@@ -507,14 +507,38 @@ def showLatestASF(path='./',timestamp=None,sum_length=1, fixed_y_scale=True, dat
         trials_per_config =  int(metadata_df['Full path'].size / metadata_df['Dimension-1 Value'].unique().size)
 
     assert 'act' in result_files_for_ASF[0], 'I was expecting "act" in filename. This might not be ASF data, aborting'
-    
-    if trials_per_config==1:
-        # Get ASF sizes from filenames: pick str btw 'act' and '-1', eval the difference, multiply by -1 to get it positive
-        filename_dict = {k:-1 * eval(k[k.find('act') + 3 : k.find('-1.gz')]) for k in result_files_for_ASF}
-    elif trials_per_config>1:
-        filename_dict = {k:-1 * eval(k[k.find('act') + 3 : k.find('-1_')]) for k in result_files_for_ASF}
 
-    filename_array_sorted = metadata_df['Full path'].values
+    #The sizes are extracted from filenames, so BE CAREFUL.
+    # Assuming annulus data if filename begins with 'ANN'
+    if result_files_for_ASF[0][:3]=='ANN':
+        assert result_files_for_ASF[0].count('act')==3, '''Annulus data should have "act" three times in results data filename ie 
+                                                           in the spike_times variable, aborting'''
+        filename_dict = {}
+        for this_file in result_files_for_ASF:
+            relevant_substring = this_file[this_file.index('act'):this_file.index('.gz')]
+            try:
+                active_ranges = eval("np.array([[" + relevant_substring[3:].replace('act','],[').replace('-',',') + "]])")
+            except:
+                relevant_substring = relevant_substring[:relevant_substring.index('_')] # 2-dim run puts _nextDimParmas to end
+                active_ranges = eval("np.array([[" + relevant_substring[3:].replace('act','],[').replace('-',',') + "]])")
+
+            annulus_distance = (np.mean(active_ranges[0,:]) - active_ranges[1,1] + active_ranges[2,0] - np.mean(active_ranges[0,:])) / 2
+            filename_dict[this_file] = annulus_distance
+
+        filename_array_sorted = metadata_df['Full path'].iloc[::-1].values
+    
+    # This should be ASF data
+    elif result_files_for_ASF[0][:3]=='ASF':
+        if trials_per_config==1:
+            # Get ASF radius (SIC) from filenames: pick str btw 'act' and '-1', eval the difference, multiply by -1 to get it positive
+            filename_dict = {k:(-1 * eval(k[k.find('act') + 3 : k.find('-1.gz')]))/2 for k in result_files_for_ASF}
+        elif trials_per_config>1:
+            filename_dict = {k:(-1 * eval(k[k.find('act') + 3 : k.find('-1_')]))/2 for k in result_files_for_ASF}
+        filename_array_sorted = metadata_df['Full path'].values
+
+    else:
+        assert 0, "Neither ASF nor ANN in filename, aborting"
+
 
     # Get unique ASF_size values with set command
     ASF_x_axis_values = sorted(set(filename_dict.values()))
@@ -534,6 +558,8 @@ def showLatestASF(path='./',timestamp=None,sum_length=1, fixed_y_scale=True, dat
     search_variable = 0
     ASF_size = 0
 
+    epoch_duration = np.max(data['time_vector']) - np.min(data['time_vector'])
+
     # for filename in filename_dict_sorted:
     for filename in filename_array_sorted:
         data = getData(filename)
@@ -547,7 +573,7 @@ def showLatestASF(path='./',timestamp=None,sum_length=1, fixed_y_scale=True, dat
             # Select data, add to nd array
             if data_type == 'spikes':
                 full_vector=data['spikes_all'][neuron_group]['count'].astype('float64')
-                firing_frequency = np.mean(full_vector[neuron_indices])
+                firing_frequency = np.mean(full_vector[neuron_indices]) / epoch_duration
                 ASF_dict[neuron_group][ASF_size, search_variable, trial] = firing_frequency
             elif data_type == 'current':
                 I_total_mean, I_excitatory_mean, I_inhibitory_mean = getI(neuron_group, data)
@@ -556,12 +582,19 @@ def showLatestASF(path='./',timestamp=None,sum_length=1, fixed_y_scale=True, dat
                 ASF_dict[neuron_group][ASF_size, search_variable, trial, 2] = I_inhibitory_mean *-1 ## Inverting inhibitory currents to positive
 
 
-            # get flag metadata/multiple trials per run. Get 2 dim data 
         trial += 1
         if trial == trials_per_config: 
             trial = 0; search_variable += 1
         if search_variable == search_variable_array_length: 
             search_variable = 0; ASF_size += 1
+
+    # For ANN data the ANN size is inverted above, resulting in inverting search variable and trial, too.
+    # Here, the search variable will be inverted. I also invert the trial number for consistency.
+    if result_files_for_ASF[0][:3]=='ANN':
+        ASF_dict_inv = {}
+        for neuron_group in list_of_results:
+            ASF_dict_inv[neuron_group] = np.flip(ASF_dict[neuron_group], axis=(1,2)) # dim 1 = search variable, dim 2 = trial
+        ASF_dict = ASF_dict_inv
 
     # Visualize
     n_images=len(list_of_results)
