@@ -1,7 +1,7 @@
-sublayer, layer, sub_proportion # sub proportion is the sub layer thickness from full layer thickness, estimated here to be 1/(N sub layers)
+sublayer, layer, sub_proportion, comment 
 L1,L1,1
 L23,L23,1
-L2-3A,L23,0.66
+L2-3A,L23,0.66, sub proportion is the sub layer thickness from full layer thickness, estimated here to be 1/(N sub layers)
 L2,L23,0.33
 L3A,L23,0.33
 L2-3A_BL,L23, 0.264 # 0.4*0.66 # relative blob area * relative L2-3A/L23 thickness, Schein_1987_JNeurosci; Livingstone_1984_JNeurosci

@@ -1,4 +1,4 @@
-Layer, N_neurons_10e6, Synapses_per_neuron_10e3, percent_inhibitory
+layer, n_neurons_10e6, synapses_per_neuron_10e3, percent_inhibitory
 1, 0.47, 61.8, 84
 2, 22, 1.3, 20
 3, 22, 1.3, 20
