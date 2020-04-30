@@ -120,13 +120,12 @@ class Groups:
         
             # Excitatory proportions are not currently used
             self.inhibitory_proportions_df, self.excitatory_proportions_df = self.get_allen_cell_type_proportions(cell_type_allen_V1clean_df)
-        else: # If no source is defined, check for cell group definitions and set e and i proportions
-            N_inhibitory_types = len(requested_cell_types_and_proportions['inhibitory_types'])
-            proportions = 1/N_inhibitory_types
-            inhibitory_proportions_df = pd.DataFrame(index=requested_cell_types_and_proportions['inhibitory_types'], columns=area_object.requested_layers)
-            self.inhibitory_proportions_df = inhibitory_proportions_df.fillna(value=proportions)
-            pdb.set_trace()
-            self.inhibitory_proportions_df = self.excitatory_proportions_df = pd.DataFrame() # Needs to exist for technical reasons
+        # If no proportions is defined, fill proportions with 1/N cell types
+        elif cell_type_data_source=='': 
+            if not requested_cell_types_and_proportions['inhibitory_proportions']: 
+                self.inhibitory_proportions_df = self.get_empty_cell_type_proportions(requested_layers, requested_cell_types_and_proportions['inhibitory_types'])
+            if not requested_cell_types_and_proportions['excitatory_proportions']: 
+                self.excitatory_proportions_df = self.get_empty_cell_type_proportions(requested_layers, requested_cell_types_and_proportions['excitatory_types'])
 
         # Get df with neuron group names, numbers & positions by layer and type
         NG_df = self.generate_cell_groups(area_object, requested_cell_types_and_proportions)
@@ -165,11 +164,6 @@ class Groups:
         # Calculate the number of cell groups
 
         # Set inhibitory types
-        # inhibitory neurons are divided into three groups in each layer, except in L1. In L1 we have limited data. The inh neurons will
-        # for sure be structurally simple. Whether we need a separate cell type is an open question. We could use the LAMP5 molecular marker as L1I 
-        # neuron, but then we need to assing its proportion in other layers with no idea of its structure. See Tasic_2018_Nature
-        # One limitation is that we are using Allen molecular types to get quantities of our limited set of structural types.
-        # inhibitory_types = ['SST', 'VIP', 'PVALB']
 
         if inhibitory_proportions:
             inhibitory_proportions_df =  pd.DataFrame(data=inhibitory_proportions, index=inhibitory_types)
@@ -180,9 +174,6 @@ class Groups:
             inhibitory_proportions_df = inhibitory_proportions_df_clean / inhibitory_proportions_df_clean.sum(axis=0)
 
         # # Set excitatory types
-        # # Each PC group in layers L2 to L6 are divided into two. The first has apical dendrite extending to L1 and the second to L23 (L4-5, or L4C (L6)
-        # # see Lund_1991_JCompNeurol, Callaway_1996_VisNeurosci, Nassi_2007_Neuron, Nhan_2012_JCompNeurol, Wiser_1996_Jneurosci, Briggs_2016_Neuron
-
         if excitatory_proportions:
             excitatory_proportions_df = pd.DataFrame(data=excitatory_proportions, index=excitatory_types)
         else:
@@ -273,7 +264,17 @@ class Groups:
             inhibitory_proportions_df[layer_for_count] = proportions_inh
 
         return inhibitory_proportions_df, excitatory_proportions_df
-        
+
+    def get_empty_cell_type_proportions(self, requested_layers, requested_types):
+        '''
+        Create cell type proportions from N cell types when they are not defined by user or pre-existing data
+        '''
+        N_types = len(requested_types)
+        proportions = 1/N_types
+        proportions_df = pd.DataFrame(index=requested_types, columns=requested_layers).fillna(proportions)
+
+        return proportions_df
+
     def generate_cell_rows(self):
             # Generate df for holding the neuron groups
         columns = ['row_type','idx','number_of_neurons','neuron_type','neuron_subtype','layer_idx','net_center','monitors','n_background_inputs','n_background_inhibition']
@@ -375,36 +376,58 @@ The sublayer to layer mapping file contains eg sublayers 4Cm, L6A etc. Cell prop
 '''
 
 if __name__ == "__main__":
-    
-    area_name='V1'
-    requested_layers=['L1', 'L23', 'L4A','L4B', 'L4CA', 'L4CB','L5','L6']
-    requestedVFradius=.1
-    center_ecc=5
+    '''
+    Start of user input
+    Copy and comment/uncomment examples/your own versions by need. If python gives exception, look first your own syntax below.
+    '''
 
-    # # Inhibitory proportions come from Allen data below
-    # # Their types must match the cell_type_data_file_name data
-    # inhibitory_types = ['SST', 'VIP', 'PVALB']
+    area_name='V1' # Don't change this.
+    requested_layers=['L1', 'L23', 'L4A','L4B', 'L4CA', 'L4CB','L5','L6'] # You should be able start from L4CA or B alone for testing
+    requestedVFradius=.1 # Increasing this rapidly makes much more cells and increases the computational cost
+    center_ecc=5 # Don't change this. This might be later replaced by 2D coordinates
+
+    '''
+    The proportion of inhibitory and excitatory neurons in distinct V1 layers will come from our review Table2.
+    Below, you provide inhibitory and excitatory cell types and proportions when you have more than one type for each.
+    Cell types are mandatory, and their names must match both Allen/HBP data table if these are used and physiology file cell type names
+    Inhibitory and excitatory cell type proportions layerwise come either from  Allen/HBP data, 
+    or you can define them by hand below. If left empty, 1/N cell types will be used for each layer.
+
+    Later in an advanced version of the system, you can use the considerations below:
+    Inhibitory neurons are divided into three groups in each layer, except in L1. In L1 we have limited data. The inh neurons will
+    for sure be structurally simple. Whether we need a separate cell type for L1 is an open question. We could use the LAMP5 molecular marker as L1I 
+    neuron, but then we need to assing its proportion in other layers with no idea of its structure. See Tasic_2018_Nature
+    One limitation is that we are using Allen molecular types to get quantities of our limited set of structural types.
+    inhibitory_types = ['SST', 'VIP', 'PVALB'] # This is a good guess, and take these proportions from Allen data
+
+    For excitatory neurons we do not have HBP/Allen data to start with because only structural types currently implementd in CxSystem are 
+    pyramidal cells (PC) with apical dendrites and spiny stellate (SS) cells which are point-like.
+    Each PC group in layers L2 to L6 are divided into two. The first has apical dendrite extending to L1 and the second to L23 (L4-5, or L4C (L6)
+    see Lund_1991_JCompNeurol, Callaway_1996_VisNeurosci, Nassi_2007_Neuron, Nhan_2012_JCompNeurol, Wiser_1996_Jneurosci, Briggs_2016_Neuron
+
+    '''
+    
+    # Here are some examples
+    inhibitory_types = ['SST', 'VIP', 'PVALB']
+    inhibitory_proportions={} # Leaving this empty will produce 1/N types proportions for each layer
+
+    # Excitatory proportions are given by hand here. The list length for each layer must match the N types and should sum to approximately 1.
+    # The SS type in L1 is just a pointlike excitatory neuron
+    excitatory_types = ['SS', 'PC1', 'PC2']
+    excitatory_proportions = {  
+    'L1': [1, 0, 0], 
+    'L23': [0, .5, .5], 
+    'L4A': [.33, .33, .33], 
+    'L4B': [.33, .33, .33], 
+    'L4C': [1, 0, 0],
+    'L5': [0, .5, .5], 
+    'L6': [0, .5, .5]}
+
+    # inhibitory_types = ['example1','example2','example3'] # Name example is used for construction. For simulation, these need to match the physiology cell type names
     # inhibitory_proportions={}
 
-    # # Excitatory types are given by hand here
-    # excitatory_types = ['SS', 'PC1', 'PC2']
-    # excitatory_proportions = {  
-    # 'L1': [0, 1, 0], 
-    # 'L23': [0, .5, .5], 
-    # 'L4A': [.33, .33, .33], 
-    # 'L4B': [.33, .33, .33], 
-    # 'L4C': [1, 0, 0],
-    # 'L5': [0, .5, .5], 
-    # 'L6': [0, .5, .5]}
-
-    # Inhibitory proportions come from Allen data below
-    # Their types must match the cell_type_data_file_name data
-    inhibitory_types = ['pippi','pappa','puppu']
-    inhibitory_proportions={}
-
-    # Excitatory types are given by hand here
-    excitatory_types = ['peppe'] # This IT is an excitatory cell type in Allen data, referes to intratelencephalic
-    excitatory_proportions = {}
+    # excitatory_types = ['example4'] 
+    # excitatory_proportions = {}
 
     # Read in anat csv to start with. Check for config_files folder for valid inputs.
     # If replace_existing_cell_groups flag is False, your groups will be added to current groups. This allows building system stepwise
