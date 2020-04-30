@@ -2,11 +2,15 @@ import numpy as np
 from matplotlib import pyplot as plt
 import os
 import pandas as pd
+
+from cxsystem2.core.tools import  read_config_file
+
 import pdb
 
 
 path_to_tables = r'C:\Users\Simo\Laskenta\Models\MacV1Buildup\tables'
 path_to_ni_csv = r'C:\Users\Simo\Laskenta\Models\MacV1Buildup\ni_csv_copy'
+path_to_config_files = r'C:\Users\Simo\Laskenta\Models\MacV1Buildup\config_files'
 
 # Module level utilities
 def read_data_from_tables(path, filename):
@@ -89,16 +93,17 @@ class Area:
         return V1area
 
 
-class Groups():
+class Groups:
 
-    def __init__(self, area_object, requested_cell_types_and_proportions, cell_type_data_folder_name, cell_type_data_file_name, cell_type_data_source='Allen'):
+    def __init__(self, area_object, requested_cell_types_and_proportions, cell_type_data_folder_name, cell_type_data_file_name, cell_type_data_source):
         
         fullpath = os.path.join(path_to_tables, cell_type_data_folder_name)
         cell_type_df = read_data_from_tables(fullpath, cell_type_data_file_name)
 
         if cell_type_data_source=='HBP' or cell_type_data_source=='Markram':
             # Get inhibitory cell type proportions from Markram rat somatosensory data
-            self.inhibitory_proportions_df = get_markram_cell_type_proportions(cell_type_df)
+            self.inhibitory_proportions_df = self.get_markram_cell_type_proportions(cell_type_df)
+            self.excitatory_proportions_df = pd.DataFrame() # Needs to exist for technical reasons
 
         elif cell_type_data_source=='Allen':
             # Get inhibitory cell type proportions from Allen institute data for human V1
@@ -114,7 +119,14 @@ class Groups():
             cell_type_allen_V1clean_df = cell_type_allen_V1_df.drop(columns=['region_label'])
         
             # Excitatory proportions are not currently used
-            self.inhibitory_proportions_df, self.excitatory_proportions_df = get_allen_cell_type_proportions(cell_type_allen_V1clean_df)
+            self.inhibitory_proportions_df, self.excitatory_proportions_df = self.get_allen_cell_type_proportions(cell_type_allen_V1clean_df)
+        else: # If no source is defined, check for cell group definitions and set e and i proportions
+            N_inhibitory_types = len(requested_cell_types_and_proportions['inhibitory_types'])
+            proportions = 1/N_inhibitory_types
+            inhibitory_proportions_df = pd.DataFrame(index=requested_cell_types_and_proportions['inhibitory_types'], columns=area_object.requested_layers)
+            self.inhibitory_proportions_df = inhibitory_proportions_df.fillna(value=proportions)
+            pdb.set_trace()
+            self.inhibitory_proportions_df = self.excitatory_proportions_df = pd.DataFrame() # Needs to exist for technical reasons
 
         # Get df with neuron group names, numbers & positions by layer and type
         NG_df = self.generate_cell_groups(area_object, requested_cell_types_and_proportions)
@@ -132,12 +144,12 @@ class Groups():
             -set inhibitory types
             -calculate the number of cell groups
             -generate df for holding the neuron groups
-            row_type,idx,number_of_neurons,neuron_type,neuron_subtype,layer_idx,net_center,monitors,n_background_inputs,n_background_inhibition
+                -get starting neuron group idx and line number of insert from anatomy csv
+            idx (running number),number_of_neurons,neuron_type,neuron_subtype,layer_idx,net_center
             -map the Table2 data into cell groups
             -calculate density for each group
             -set positions by layer and type
             -return df with neuron group names, numbers & positions by layer and type 
-            TÄHÄN JÄIT: LAITA INH TYPES, EXC TYPES JA EXC PROPORTIONS JÄRKEVÄMPÄÄN PAIKKAAN, JONNEKIN ESILLE
         '''
         # Unpacking for current method
         area_proportion = area_object.area_proportion
@@ -170,17 +182,7 @@ class Groups():
         # # Set excitatory types
         # # Each PC group in layers L2 to L6 are divided into two. The first has apical dendrite extending to L1 and the second to L23 (L4-5, or L4C (L6)
         # # see Lund_1991_JCompNeurol, Callaway_1996_VisNeurosci, Nassi_2007_Neuron, Nhan_2012_JCompNeurol, Wiser_1996_Jneurosci, Briggs_2016_Neuron
-        # # SS groups are in all L4 sublayers
-        # excitatory_types = ['SS', 'PC1', 'PC2']
-        # # Construct df manually, excitatory_proportions should sum to about 1
-        # excitatory_proportions = {  
-        #     'L1': [0, 1, 0], 
-        #     'L23': [0, .5, .5], 
-        #     'L4A': [.33, .33, .33], 
-        #     'L4B': [.33, .33, .33], 
-        #     'L4C': [1, 0, 0],
-        #     'L5': [0, .5, .5], 
-        #     'L6': [0, .5, .5]}
+
         if excitatory_proportions:
             excitatory_proportions_df = pd.DataFrame(data=excitatory_proportions, index=excitatory_types)
         else:
@@ -193,7 +195,6 @@ class Groups():
         layer_name_mapping_df = area_object.layer_name_mapping_df # Should be inherited from Area class
         layer_mapping_df = layer_name_mapping_df.loc[layer_name_mapping_df['requested_layers'].isin(requested_layers)]
 
-        # TÄHÄN JÄIT: ASSERTIOT E JA I DFLLE, TESTAA KAIKKI NELJÄ IF KONDITIOTA
         # Generate df for holding the neuron groups
         columns = ['row_type','idx','number_of_neurons','neuron_type','neuron_subtype','layer_idx','net_center','monitors','n_background_inputs','n_background_inhibition']
         NG_df = pd.DataFrame(columns=columns)
@@ -202,6 +203,77 @@ class Groups():
 
         pdb.set_trace()
 
+    def get_markram_cell_type_proportions(self, cell_type_df):
+        # Get cell type proportions from Markram rat somatosensory cx data
+        n_neurons_per_type = cell_type_df.loc['No. of neurons per morphological types',:]
+        type_mapping = {
+            'SST' : ['MC'],
+            'PVALB' : ['NBC','LBC'],
+            'VIP' : ['SBC','BP','DBC']}
+        layers_for_cell_count = cell_type_df.columns.values
+        type_count = {}
+        inhibitory_proportions_df = pd.DataFrame(index=type_mapping.keys())
+
+        # calculate sum of inhibitory SST, PV and VIP cells
+        for layer_for_count in layers_for_cell_count:
+            cell_count_dict = n_neurons_per_type[layer_for_count]
+            layer_string_to_add = layer_for_count + '_'
+            for current_type in type_mapping.keys():
+                n_neurons_for_current_type = 0
+                subtypes_list = type_mapping[current_type]
+                for current_subtype in subtypes_list:
+                    try:
+                        n_neurons_for_current_subtype = cell_count_dict[layer_string_to_add + current_subtype]
+                        n_neurons_for_current_type += n_neurons_for_current_subtype
+                    except KeyError:
+                        continue
+                type_count[current_type] = n_neurons_for_current_type
+
+            # get proportions of the three types in different layers
+            type_count_array = np.fromiter(type_count.values(), dtype=float)
+            proportions = type_count_array/sum(type_count_array)
+            inhibitory_proportions_df[layer_for_count] = pd.Series(proportions, index=type_mapping.keys())
+        return inhibitory_proportions_df
+
+    def get_allen_cell_type_proportions(self, cell_type_allen_df):
+        grouped = cell_type_allen_df.groupby(['class_label', 'cortical_layer_label'])
+        allen_layers = cell_type_allen_df['cortical_layer_label'].unique()
+        # n_allen_layers = cell_type_allen_df['cortical_layer_label'].nunique()
+
+        # Prepare for getting unique cell types from Allen data
+        cell_type_allen_df_for_unique_types = cell_type_allen_df.drop('cortical_layer_label', axis=1)
+        grouped_for_unique_types = cell_type_allen_df_for_unique_types.groupby(['class_label'])
+
+
+        # # Inhibitory proportions
+        # types=['SST','PVALB','VIP']
+        # #  Empty df for collecting inhibitory neuron proportions by layer
+        # inhibitory_proportions_df = pd.DataFrame(index=types)
+
+        # for layer_for_count in allen_layers:
+        #     GABAneurons_by_layer_df = grouped.get_group(('GABAergic',layer_for_count))
+        #     mask = GABAneurons_by_layer_df.subclass_label.isin(types)
+        #     GABAneurons_by_layer_df_clean = GABAneurons_by_layer_df[mask]
+        #     proportions = GABAneurons_by_layer_df_clean['subclass_label'].value_counts(normalize=True)
+        #     inhibitory_proportions_df[layer_for_count] = proportions
+
+        # Excitatory proportions
+        # Get unique types
+        types_exc=grouped_for_unique_types.get_group('Glutamatergic')['subclass_label'].unique()
+        types_inh=grouped_for_unique_types.get_group('GABAergic')['subclass_label'].unique()
+        excitatory_proportions_df = pd.DataFrame(index=types_exc)
+        inhibitory_proportions_df = pd.DataFrame(index=types_inh)
+
+        for layer_for_count in allen_layers:
+            GLUneurons_by_layer = grouped.get_group(('Glutamatergic',layer_for_count))
+            GABAneurons_by_layer = grouped.get_group(('GABAergic',layer_for_count))
+            proportions_exc = GLUneurons_by_layer['subclass_label'].value_counts(normalize=True)
+            proportions_inh = GABAneurons_by_layer['subclass_label'].value_counts(normalize=True)
+            excitatory_proportions_df[layer_for_count] = proportions_exc
+            inhibitory_proportions_df[layer_for_count] = proportions_inh
+
+        return inhibitory_proportions_df, excitatory_proportions_df
+        
     def generate_cell_rows(self):
             # Generate df for holding the neuron groups
         columns = ['row_type','idx','number_of_neurons','neuron_type','neuron_subtype','layer_idx','net_center','monitors','n_background_inputs','n_background_inhibition']
@@ -219,7 +291,6 @@ class Connections:
         self.inh_df = read_data_from_tables(path_to_ni_csv, 'connections_local_inhibitory.csv')
 
 
-
 '''
 How do we assign connections to distinct cell groups -- Peter's law? 
 -- start from Peters' rule. Later, includes White's exceptions (see Braitenberg & Schuz 1998, pp 100-101)
@@ -235,79 +306,6 @@ Make up naming and coding system for cell groups in distinct layers according to
  Table 2: Total number of neurons, synapses/neuron, and the proportion of inhibitory interneurons in each cortical layer of area V1
  Table 4: Summary of horizontal connectivity
 '''
-
-
-def get_markram_cell_type_proportions(cell_type_df):
-    # Get cell type proportions from Markram rat somatosensory data
-    n_neurons_per_type = cell_type_df.loc['No. of neurons per morphological types',:]
-    type_mapping = {
-        'SST' : ['MC'],
-        'PVALB' : ['NBC','LBC'],
-        'VIP' : ['SBC','BP','DBC']}
-    layers_for_cell_count = cell_type_df.columns.values
-    type_count = {}
-    inhibitory_proportions_df = pd.DataFrame(index=type_mapping.keys())
-
-    # calculate sum of inhibitory SST, PV and VIP cells
-    for layer_for_count in layers_for_cell_count:
-        cell_count_dict = n_neurons_per_type[layer_for_count]
-        layer_string_to_add = layer_for_count + '_'
-        for current_type in type_mapping.keys():
-            n_neurons_for_current_type = 0
-            subtypes_list = type_mapping[current_type]
-            for current_subtype in subtypes_list:
-                try:
-                    n_neurons_for_current_subtype = cell_count_dict[layer_string_to_add + current_subtype]
-                    n_neurons_for_current_type += n_neurons_for_current_subtype
-                except KeyError:
-                    continue
-            type_count[current_type] = n_neurons_for_current_type
-
-        # get proportions of the three types in different layers
-        type_count_array = np.fromiter(type_count.values(), dtype=float)
-        proportions = type_count_array/sum(type_count_array)
-        inhibitory_proportions_df[layer_for_count] = pd.Series(proportions, index=type_mapping.keys())
-    return inhibitory_proportions_df
-
-def get_allen_cell_type_proportions(cell_type_allen_df):
-    grouped = cell_type_allen_df.groupby(['class_label', 'cortical_layer_label'])
-    allen_layers = cell_type_allen_df['cortical_layer_label'].unique()
-    # n_allen_layers = cell_type_allen_df['cortical_layer_label'].nunique()
-
-    # Prepare for getting unique cell types from Allen data
-    cell_type_allen_df_for_unique_types = cell_type_allen_df.drop('cortical_layer_label', axis=1)
-    grouped_for_unique_types = cell_type_allen_df_for_unique_types.groupby(['class_label'])
-
-
-    # # Inhibitory proportions
-    # types=['SST','PVALB','VIP']
-    # #  Empty df for collecting inhibitory neuron proportions by layer
-    # inhibitory_proportions_df = pd.DataFrame(index=types)
-
-    # for layer_for_count in allen_layers:
-    #     GABAneurons_by_layer_df = grouped.get_group(('GABAergic',layer_for_count))
-    #     mask = GABAneurons_by_layer_df.subclass_label.isin(types)
-    #     GABAneurons_by_layer_df_clean = GABAneurons_by_layer_df[mask]
-    #     proportions = GABAneurons_by_layer_df_clean['subclass_label'].value_counts(normalize=True)
-    #     inhibitory_proportions_df[layer_for_count] = proportions
-
-    # Excitatory proportions
-    # Get unique types
-    types_exc=grouped_for_unique_types.get_group('Glutamatergic')['subclass_label'].unique()
-    types_inh=grouped_for_unique_types.get_group('GABAergic')['subclass_label'].unique()
-    excitatory_proportions_df = pd.DataFrame(index=types_exc)
-    inhibitory_proportions_df = pd.DataFrame(index=types_inh)
-
-    for layer_for_count in allen_layers:
-        GLUneurons_by_layer = grouped.get_group(('Glutamatergic',layer_for_count))
-        GABAneurons_by_layer = grouped.get_group(('GABAergic',layer_for_count))
-        proportions_exc = GLUneurons_by_layer['subclass_label'].value_counts(normalize=True)
-        proportions_inh = GABAneurons_by_layer['subclass_label'].value_counts(normalize=True)
-        excitatory_proportions_df[layer_for_count] = proportions_exc
-        inhibitory_proportions_df[layer_for_count] = proportions_inh
-
-    return inhibitory_proportions_df, excitatory_proportions_df
- 
 def cell_group_row():
     '''
     cell_group_row function
@@ -339,9 +337,6 @@ show_cortex
 Visualize the neurons (and connections?) in 3D
 visimpl?
 '''
-
-# def ni2anat(requestedVFradius=.1, center_ecc=5,layers=['L1', 'L23', 'L4A','L4B', 'L4CA', 'L4CB','L5','L6']):
-
 
 
     
@@ -386,32 +381,50 @@ if __name__ == "__main__":
     requestedVFradius=.1
     center_ecc=5
 
-    # Inhibitory proportions come from Allen data below
-    # Their types must match the cell_type_data_file_name data
-    inhibitory_types = ['SST', 'VIP', 'PVALB']
-    inhibitory_proportions={}+-
-
-    # Excitatory types are given by hand here
-    excitatory_types = ['SS', 'PC1', 'PC2']
-    excitatory_proportions = {  
-    'L1': [0, 1, 0], 
-    'L23': [0, .5, .5], 
-    'L4A': [.33, .33, .33], 
-    'L4B': [.33, .33, .33], 
-    'L4C': [1, 0, 0],
-    'L5': [0, .5, .5], 
-    'L6': [0, .5, .5]}
-
     # # Inhibitory proportions come from Allen data below
     # # Their types must match the cell_type_data_file_name data
-    # inhibitory_types = ['PVALB']
+    # inhibitory_types = ['SST', 'VIP', 'PVALB']
     # inhibitory_proportions={}
 
     # # Excitatory types are given by hand here
-    # excitatory_types = ['IT'] # This IT is an excitatory cell type in Allen data, referes to intratelencephalic
-    # excitatory_proportions = {}
+    # excitatory_types = ['SS', 'PC1', 'PC2']
+    # excitatory_proportions = {  
+    # 'L1': [0, 1, 0], 
+    # 'L23': [0, .5, .5], 
+    # 'L4A': [.33, .33, .33], 
+    # 'L4B': [.33, .33, .33], 
+    # 'L4C': [1, 0, 0],
+    # 'L5': [0, .5, .5], 
+    # 'L6': [0, .5, .5]}
 
-    # Let's pack them for brevity
+    # Inhibitory proportions come from Allen data below
+    # Their types must match the cell_type_data_file_name data
+    inhibitory_types = ['pippi','pappa','puppu']
+    inhibitory_proportions={}
+
+    # Excitatory types are given by hand here
+    excitatory_types = ['peppe'] # This IT is an excitatory cell type in Allen data, referes to intratelencephalic
+    excitatory_proportions = {}
+
+    # Read in anat csv to start with. Check for config_files folder for valid inputs.
+    # If replace_existing_cell_groups flag is False, your groups will be added to current groups. This allows building system stepwise
+    replace_existing_cell_groups = True # 
+    anatomy_config_file_name = 'pytest_anatomy_config.csv'
+    physiology_config_file_name = 'pytest_physiology_config.csv' # anatomy and physiology filenames sometimes diverge
+
+    
+    cell_type_data_source = '' # Valid entries 'Allen' and 'HBP' and ''
+    # # Markram data, rat S1
+    # cell_type_data_folder_name='hbp_data'; cell_type_data_file_name='layer_download.json'
+    
+    # Allen data, human V1
+    cell_type_data_folder_name='allen_data'; cell_type_data_file_name='sample_annotations.csv'
+
+
+    '''
+    End of user input
+    '''
+    # Packing of variables for brevity
     requested_cell_types_and_proportions = {
         'inhibitory_types':inhibitory_types, 
         'inhibitory_proportions':inhibitory_proportions, 
@@ -419,11 +432,10 @@ if __name__ == "__main__":
         'excitatory_proportions':excitatory_proportions}
 
     V1=Area(area_name=area_name, requestedVFradius=requestedVFradius, center_ecc=center_ecc, requested_layers=requested_layers)
-    
-    # # Markram data, rat S1
-    # cell_type_data_folder_name='hbp_data'; cell_type_data_file_name='layer_download.json'
-    
-    # Allen data, human V1
-    cell_type_data_folder_name='allen_data'; cell_type_data_file_name='sample_annotations.csv'
 
-    xx=Groups(V1, requested_cell_types_and_proportions, cell_type_data_folder_name, cell_type_data_file_name, cell_type_data_source='Allen')
+    # Add anatomy and physiology config files to start with
+    suffix_for_new_file = '_cxc'
+    V1.anatomy_config = read_config_file(os.path.join(path_to_config_files,anatomy_config_file_name))
+    V1.physiology_config = read_config_file(os.path.join(path_to_config_files,physiology_config_file_name))
+
+    xx=Groups(V1, requested_cell_types_and_proportions, cell_type_data_folder_name, cell_type_data_file_name, cell_type_data_source=cell_type_data_source)
