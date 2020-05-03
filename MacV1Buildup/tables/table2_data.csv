@@ -1,0 +1,9 @@
+layer,n_neurons_10e6,synapses_per_neuron_10e3,percent_inhibitory
+L1,0.47,61.8,84
+L23,44,1.3,20
+L4A,17,1.6,22
+L4B,17,2.7,19
+L4CA,14,1.9,8
+L4CB,24,1.4,8
+L5,20,1.7,20
+L6,24,2.1,15

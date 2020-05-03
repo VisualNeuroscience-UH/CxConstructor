@@ -1,0 +1,34 @@
+row_type,runtime,device,sys_mode,scale,grid_radius,min_distance,workspace_path,simulation_title,compression_method,import_connections_from,number_of_process,default_clock,trials_per_config,init_vms,load_positions_only,benchmark,save_input_video,multidimension_array_run,profiling,run_in_cluster,cluster_job_file_path,cluster_number_of_nodes,cluster_address,cluster_login_node,cluster_username,cluster_workspace
+params,0.5*second,Cpp,expanded,1,18400*um,1*um,/opt2/Laskenta_ssd/Models/SchwabeModel/,ASF_ConSearch_CPPtest,gzip,connections/in_radius_18.4.gz,30,0.1*ms,10,True,True,False,False,True,False,False,./csc_taito.job,1,taito.csc.fi,--,username,/homeappl/home/username/CxWorkspace
+row_type,idx,type,number_of_neurons,radius,spike_times,net_center,monitors,,,,,,,,,,,,,,,,,,,
+# ASF experiment
+IN,0,VPM,161,18400*um,100*Hz[act]{(80-81&(79-82&(78-83&(77-84&(76-85&(75-86&(74-87&(73-88&(72-89&(71-90&(70-91&(69-92&(68-93&(67-94&(65-96&(50-111&(40-121&(20-141&(0-161}-1),--,[Sp],,,,,,,,,,,,,,,,,,,
+# Annulus experiment
+#IN,0,VPM,161,18400*um,100*Hz[act](78-83)[act](0-{3)[act](158&7)[act](154&11)[act](150&21)[act](140&31)[act](130&41)[act](120&51)[act](110&61)[act](100&71)[act](90&78)[act](83}-161),--,[Sp],,,,,,,,,,,,,,,,,,,
+# Test
+#IN,0,VPM,161,18400*um,100*Hz[act](0-160-1),--,[Sp],,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,
+row_type,idx,number_of_neurons,neuron_type,neuron_subtype,layer_idx,net_center,monitors,n_background_inputs,n_background_inhibition,,,,,,,,,,,,,,,,,
+G,1,161,SS,--,2,--,[Sp] [St]vm[rec](79-82-1)+ge_soma[rec](79-82-1)+gi_soma[rec](79-82-1),6000,6000,,,,,,,,,,,,,,,,,
+G,2,161,MC,--,2,--,[Sp] [St]vm[rec](79-82-1)+ge_soma[rec](79-82-1)+gi_soma[rec](79-82-1),6000,6000,,,,,,,,,,,,,,,,,
+G,3,33,SS,--,6,--,[Sp] [St]vm[rec](15-18-1)+ge_soma[rec](15-18-1)+gi_soma[rec](15-18-1),6000,6000,,,,,,,,,,,,,,,,,
+G,4,161,SS,L2_SS_autoconn,2,--,[Sp],6000,6000,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,
+row_type,receptor,pre_syn_idx,post_syn_idx,syn_type,p,n,monitors,load_connection,save_connection,custom_weight,spatial_decay,,,,,,,,,,,,,,,
+#S,ge,0,1,Fixed_spatial_decay_wght,1,1,--,0,1,24*nS,4.35[ij],,,,,,,,,,,,,,,
+S,ge,0,1,Fixed_spatial_decay_wght,1,1,--,0,1,{12&16&20&24&28}*nS,4.35[ij],,,,,,,,,,,,,,,
+S,ge,1,1,Fixed_spatial_decay_wght,1,1,--,0,1,3.38*nS,1,,,,,,,,,,,,,,,
+S,ge,1,4,Fixed_const_wght,1,1,--,0,1,85*nS,[ij],,,,,,,,,,,,,,,
+S,ge,4,1,Fixed_const_wght,1,1,--,0,1,85*nS,[ij],,,,,,,,,,,,,,,
+S,ge,1,3,Fixed_spatial_decay_wght,1,1,--,0,1,4.52*nS,0.13,,,,,,,,,,,,,,,
+##S,ge,1,2,Fixed_spatial_decay_wght,1,1,--,0,1,34*nS,1[ij],,,,,,,,,,,,,,,
+S,ge,1,2,Fixed_const_wght,1,1,--,0,1,34*nS,[ij],,,,,,,,,,,,,,,
+##S,ge,1,2,Fixed_spatial_decay_wght,1,1,--,0,1,34*nS,1,,,,,,,,,,,,,,,
+S,ge,1,2,Fixed_spatial_decay_wght,1,1,--,0,1,17*nS,1,,,,,,,,,,,,,,,
+S,ge,3,1,Fixed_spatial_decay_wght,1,1,--,0,1,4.52*nS,0.13,,,,,,,,,,,,,,,
+S,ge,3,2,Fixed_spatial_decay_wght,1,1,--,0,1,13.5*nS,0.13,,,,,,,,,,,,,,,
+S,gi,2,1,Fixed_const_wght,1,1,--,0,1,122*nS,[ij],,,,,,,,,,,,,,,
+S,gi,2,2,Fixed_const_wght,1,1,--,0,1,12*nS,[ij],,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,
+#TÄHÄN JÄIT
+#E/I BALANSSI

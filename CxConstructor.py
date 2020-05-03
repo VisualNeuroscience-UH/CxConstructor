@@ -7,10 +7,10 @@ from cxsystem2.core.tools import  read_config_file
 
 import pdb
 
-
-path_to_tables = r'C:\Users\Simo\Laskenta\Models\MacV1Buildup\tables'
-path_to_ni_csv = r'C:\Users\Simo\Laskenta\Models\MacV1Buildup\ni_csv_copy'
-path_to_config_files = r'C:\Users\Simo\Laskenta\Models\MacV1Buildup\config_files'
+root_path = r'C:\Users\Simo\Laskenta\PythonUtilities\MacV1Buildup'
+path_to_tables = os.path.join(root_path, 'tables')
+path_to_ni_csv = os.path.join(root_path, 'ni_csv_copy')
+path_to_config_files = os.path.join(root_path, 'config_files')
 
 
 class Config:
@@ -42,6 +42,7 @@ class Config:
             raise NotImplementedError('Unexpected filename extension')
 
         return df
+
 
 class Area:
     '''
@@ -132,6 +133,16 @@ class Groups:
         self.excitatory_proportions_df = self.get_proportions_df(   'Glutamatergic',excitatory_proportions, excitatory_types, requested_layers, 
                                                                     cell_type_data_source, cell_type_data_folder_name, cell_type_data_file_name)
         
+        # Choose layer mappings according to requested layers. 
+        # TODO If an entry has two values separated by ";", the two values must be averaged
+        layer_name_mapping_df = area_object.layer_name_mapping_df # Should be acquired from Area class instance object
+        # Map requested layers to allowed neuroinformatics sublayers.
+        layer_mapping_df = layer_name_mapping_df.loc[layer_name_mapping_df['allowed_requested_layers'].isin(requested_layers)]
+        # Add numerical layer index to layer_mapping_df
+        layer_idxs = np.arange(len(requested_layers)) + 1
+        layer_mapping_df['layer_idx'] = layer_idxs.tolist()
+
+        self.layer_mapping_df = layer_mapping_df
 
         # Get df with neuron groups for anatomy df, return new df to object
         self.anatomy_config_df_new = self.generate_cell_groups(CxC, area_object, requested_cell_types_and_proportions)
@@ -151,18 +162,12 @@ class Groups:
         anatomy_config_df = CxC.anatomy_config_df
         area_proportion = area_object.area_proportion
         requested_layers = area_object.requested_layers
-        layer_name_mapping_df = area_object.layer_name_mapping_df
         PC_apical_dendrites = area_object.PC_apical_dendrites
         inhibitory_proportions_df = self.inhibitory_proportions_df
         excitatory_proportions_df = self.excitatory_proportions_df
         monitors = self.monitors
         background_input = self.bg_inputs
-
-        # Choose layer mappings according to requested layers. If an entry has two values separated by ";", the two values must be averaged
-        layer_name_mapping_df = area_object.layer_name_mapping_df # Should be acquired from Area class instance object
-        # Map requested layers to allowed neuroinformatics sublayers.
-        layer_mapping_df = layer_name_mapping_df.loc[layer_name_mapping_df['allowed_requested_layers'].isin(requested_layers)]
-
+        layer_mapping_df = self.layer_mapping_df 
 
         # Get and set column names for neuron groups
         cell_group_columns = anatomy_config_df.loc[anatomy_config_df.groupby([0]).get_group('G').index[0]-1,:].values
@@ -198,10 +203,6 @@ class Groups:
 
         # Add one layer at a time starting from L1
         current_group_index = start_index
-
-        # Add numerical layer index to layer_mapping_df
-        layer_idxs = np.arange(len(requested_layers)) + 1
-        layer_mapping_df['layer_idx'] = layer_idxs.tolist()
 
         for layer in requested_layers:
             current_layer_proportion_inhibitory = table2_df.loc[layer]['percent_inhibitory'] / 100
@@ -374,52 +375,43 @@ class Groups:
 
 class Connections:
 
-    def __init__(self):
+    def __init__(self, CxC, NG_new):
+        '''
+        Generate synapses object, which includes the new anatomy df with connections
+        '''
+        
+        # Set parameters to connections object
+        self.replace_existing_cell_groups = CxC.replace_existing_cell_groups
         
         # Read data from files.
         # Read ni csv into dataframe
         self.exc_df = CxC.read_data_from_tables(path_to_ni_csv, 'connections_local_excitatory.csv')
         self.inh_df = CxC.read_data_from_tables(path_to_ni_csv, 'connections_local_inhibitory.csv')
 
+        self.anatomy_config_df_new_connections = NG_new.anatomy_config_df_new
 
-'''
-How do we assign connections to distinct cell groups -- Peter's law? 
--- start from Peters' rule. Later, includes White's exceptions (see Braitenberg & Schuz 1998, pp 100-101)
-    -create cell numbers and type proportions by layer -- lue
-        -excitatory: SS and PC in L4, PC elsewhere
-            -excitatory subgroups?
-        -inhibitory: PV, SST and VIP neurons
-            -proportions in distinct layers, data for macaques? If not then rodents -- eg Markram
+        self.anatomy_config_df_new_connections_new_synapses = self.generate_synapses()
 
-Make up naming and coding system for cell groups in distinct layers according to CxSystem framework
-    -preparation for flexibility
- Table 1: Cortical surface areas (mm2) from anatomical studies
- Table 2: Total number of neurons, synapses/neuron, and the proportion of inhibitory interneurons in each cortical layer of area V1
- Table 4: Summary of horizontal connectivity
-'''
-def cell_group_row():
-    '''
-    cell_group_row function
-    We want to keep this separate method, because the syntax of the output csv file may change
-    -return row_type,idx,number_of_neurons,neuron_type,neuron_subtype,layer_idx,net_center,monitors,n_background_inputs,n_background_inhibition
-    '''
-    pass
+        pdb.set_trace()
 
-def generate_synapses():
-    '''
-    generate_synapses function
-    -for each origin and target group, set receptor,pre_syn_idx,post_syn_idx by layer and compartment,syn_type,p,n,
-    -return df with receptor,pre_syn_idx,post_syn_idx,syn_type,p,n, 
-    '''
-    pass
 
-def synapse_row():
-    pass
-'''
-synapse_row function
-We want to keep this separate method, because the syntax of the output csv file may change
--return df with: row_type: "S" ,receptor,pre_syn_idx,post_syn_idx,syn_type,p,n,monitors,load_connection,save_connection,custom_weight,spatial_decay
-'''
+    def generate_synapses(self):
+        '''
+        generate_synapses function
+        -for each origin and target group, set receptor,pre_syn_idx,post_syn_idx by layer and compartment,syn_type,p,n,
+        -return df with receptor,pre_syn_idx,post_syn_idx,syn_type,p,n, 
+
+        '''
+
+        # Unpack for this method
+        replace_existing_cell_groups = self.replace_existing_cell_groups
+        exc_df = self.exc_df 
+        inh_df = self.inh_df 
+        anatomy_config_df_new_connections = self.anatomy_config_df_new_connections
+
+        pdb.set_trace()
+
+        pass
 
 def show_cortex():
     pass
@@ -584,13 +576,15 @@ if __name__ == "__main__":
     physiology_config_df = read_config_file(os.path.join(path_to_config_files,physiology_config_file_name))    
 
     CxC = Config(replace_existing_cell_groups=replace_existing_cell_groups, anatomy_config_df=anatomy_config_df, physiology_config_df=physiology_config_df)
-    V1=Area(CxC, area_name=area_name, requestedVFradius=requestedVFradius, center_ecc=center_ecc, requested_layers=requested_layers)
+    V1 = Area(CxC, area_name=area_name, requestedVFradius=requestedVFradius, center_ecc=center_ecc, requested_layers=requested_layers)
 
     # Add anatomy and physiology config files to start with
     suffix_for_new_file = '_cxc'
 
-    NG_new=Groups(  CxC, V1, requested_cell_types_and_proportions, cell_type_data_source, cell_type_data_folder_name, 
+    NG_new = Groups(  CxC, V1, requested_cell_types_and_proportions, cell_type_data_source, cell_type_data_folder_name, 
                 cell_type_data_file_name, request_monitors,requested_background_input)
 
     NG_new.anatomy_config_df_new.to_csv(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.csv'), header=False, index=False)
+
+    Conn_new = Connections(CxC, NG_new)
 

@@ -1,0 +1,41 @@
+LIF
+{'EL': -70. * mvolt,
+ 'V_res': -65. * mvolt,
+ 'VT': -50. * mvolt,
+ 'gL': 100. * nsiemens,
+ 'C': 0.8 * nfarad,
+ 'refractory_period': 2. * msecond}
+ 
+ EIF
+ {'EL': -65. * mvolt,
+ 'V_res': -60. * mvolt,
+ 'VT': -55. * mvolt,
+ 'gL': 50. * nsiemens,
+ 'C': 0.6 * nfarad,
+ 'DeltaT': 2. * mvolt,
+ 'refractory_period': 2. * msecond,
+ 'Vcut': -30. * mvolt}
+ 
+ Adex
+ {'EL': -70. * mvolt,
+ 'V_res': -51. * mvolt,
+ 'VT': -50. * mvolt,
+ 'gL': 2. * nsiemens,
+ 'C': 10. * pfarad,
+ 'DeltaT': 2. * mvolt,
+ 'a': 0.5 * nsiemens,
+ 'b': 7. * pamp,
+ 'tau_w': 100. * msecond,
+ 'refractory_period': 2. * msecond,
+ 'Vcut': -30. * mvolt}
+ 
+ HH
+ {'EL': 10.6 * mvolt,
+ 'gL': 300. * usiemens,
+ 'C': 1. * ufarad,
+ 'EK': -12. * mvolt,
+ 'ENa': 115. * mvolt,
+ 'gK': 36. * msiemens,
+ 'gNa': 120. * msiemens,
+ 'refractory_period': 2. * msecond,
+ 'V_spike': 60. * mvolt}
