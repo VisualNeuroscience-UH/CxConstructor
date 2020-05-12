@@ -577,11 +577,11 @@ class Connections:
         self.excitatory_connections_df = self.get_local_connection_df(exc_df, area_name, 
                                             layer_name_mapping_df_full, requested_layers,
                                             layer_name_mapping_df_groups, use_all_csv_data)
+
         self.inhibitory_connections_df = self.get_local_connection_df(inh_df, area_name, 
                                             layer_name_mapping_df_full, requested_layers,
                                             layer_name_mapping_df_groups, use_all_csv_data)
         pdb.set_trace()
-
         # Generate connections
         self.anatomy_config_df_new_groups_new_synapses = self.generate_synapses()
 
@@ -642,6 +642,9 @@ class Connections:
         # Select area
         connection_df_ni_names = ni_df.groupby(['FromArea']).get_group(area_name)
 
+        # Drop unnecessary area columns
+        connection_df_ni_names = connection_df_ni_names.drop(columns=['FromArea', 'ToArea'])
+
         # Strip references
         connection_df_ni_names = connection_df_ni_names.drop(columns=['References'])
         
@@ -658,14 +661,17 @@ class Connections:
         else:
             csv2idx_dict = dict(zip(layer_name_mapping_df_groups.csv_layers, 
                                     layer_name_mapping_df_groups.layer_idx))
-            csv2proportion_dict = dict(zip(layer_name_mapping_df.csv_layers, 
-                                    layer_name_mapping_df.sub_proportion))
+            csv2proportion_dict = dict(zip(layer_name_mapping_df_groups.csv_layers, 
+                                    layer_name_mapping_df_groups.sub_proportion))
 
-        # Replace csv layer names with idx
+        # Replace csv layer names with idx. The FL_proportions and TL_proportions indicate
+        # relative layer thickness in comparison to Table 2 layers.
         connection_df_ni_names['FromLayer'] = connection_df_ni_names['FromLayer'].replace(csv2idx_dict)
         connection_df_ni_names['ToLayer'] = connection_df_ni_names['ToLayer'].replace(csv2idx_dict)
-        connection_df_ni_names['FL_proportions'] = connection_df_ni_names['FL_proportions'].replace(csv2proportion_dict)
-        connection_df_ni_names['TL_proportions'] = connection_df_ni_names['TL_proportions'].replace(csv2proportion_dict)
+        connection_df_ni_names['FL_proportions'] = \
+            connection_df_ni_names['FL_proportions'].replace(csv2proportion_dict)
+        connection_df_ni_names['TL_proportions'] = \
+            connection_df_ni_names['TL_proportions'].replace(csv2proportion_dict)
 
         # Now we just skip the rows not matching either pre- or postsynaptic layers
         layer_idxs = layer_name_mapping_df_groups.layer_idx.unique()
@@ -673,12 +679,91 @@ class Connections:
         connection_df_ni_names = connection_df_ni_names.loc[connection_df_ni_names['ToLayer'].isin(layer_idxs)]
 
 
-        # Create map from D, M, S to connection probabilities. Allows use of proportions
-        # Separate proportions for the pre- and postsynaptic side, multiply for final connections
-        # TÄHÄN JÄIT 
-        pdb.set_trace()
+        '''
+        ***Mapping from connection strength to connection probability***
 
-        return connection_df_ni_names
+        Create map from D, M, S to connection probabilities. Allows use of proportions
+        In brian2 the synaptic p (probability of connection) parameter provides the 
+        N connections / (NcellsG1 * NcellsG2), ie the number of connections from all possible pairs.
+        The brian2 n-parameter multiplies each existing connection with integer number.
+        
+        The connection strength is the proportion of axonal sprouting/labelled cells in particular layer.
+        We map connection strength value to numerical weight:
+        D, dominant = 0.5 - 1, mean 0.75
+        M, median = 0.1 - 0.5, mean 0.3
+        S, sparse = eps - 0.1, mean 0.05        
+        
+        Local connections
+        Intracellular tagging, shows single neuron structure. 
+        We get:
+        p = sw * (lw/0.5) * tw * apc
+        p: probability of connections between any two cells (brian parameter). 
+        sw: source group weight. N efferent synapses for this neuron group / mean N efferent synapses in cortical neurons
+        lw: layer weight. The connection strength parameter from ni paper. The proportion of axonal sprouting in particular layer
+        tw: target group weight. N presynaptic terminals from this neuron group / mean N presynaptic terminals from any neuron group
+        tw 0 means avoidance of the postsynaptic group. tw 1 means Peter's rule
+        apc: average probability of connection between two neurons, when efferent axon and afferent cell soma are in the same layer
+
+        N pre and postsynaptic cells is already accounted for in NeuronGroups.
+        sw, lw/0.5 and tw are all mean 1
+
+        Because we do not know sw or tw for our neuron groups, this becomes
+        p = (lw/0.5) * apc
+
+
+       ***Weighing sublayers from ni cvs to probability***
+
+        When we have multiple sublayers, we need to weigh the p value according estimated relative 
+        sublayer thickness which we assume relates to the proportion of neurons in the sublayer from 
+        all neurons in the layer. Eg for source sublayer1 to target sublayer1 connection , the p_partial value is
+        p1 =  p_s1_t1 * sst1 * tst1
+        p_s1_t1: probability of connection between source and target sublayers
+        sst1: source sublayer thickness
+        tst1: target sublayer thickness
+        
+        
+        ***Scaling total p value according to included total sublayer thicknesses***
+        
+        The total p value for connecting two neuron groups becomes
+        p_total = p1 + p2 + ... pN, where the partial p values indicate connection probabilities between each sublayer.
+ 
+        Finally, include scaling by total proportions over all included sublayers. Full layer gives one and
+        if u add sublayers A and B they include 0.5 each and BL and IB again 0.4 and 0.6 which sums to over 1.
+
+        source scaling factor ssf = sst1 + sst2 + ... + sstN
+        target scaling factor tsf = tst1 + tst2 + ... + tstN
+        
+        Final p value:
+
+        p = p_total * 2 / (ssf + tsf)
+        '''
+
+        # Calculate partial p values for each sublayer to sublayer connection
+        cw2p_dict = dict(zip(['D', 'M', 'S'],[0.75, 0.3, 0.05]))
+        apc = 0.1
+        sw = tw = 1
+        connection_df_ni_names['Strength'] = connection_df_ni_names['Strength'].replace(cw2p_dict)
+        connection_df_ni_names['p_partial'] = \
+            sw * (connection_df_ni_names['Strength'] / 0.5) * tw * apc * \
+            connection_df_ni_names['FL_proportions'] * connection_df_ni_names['TL_proportions']
+            
+        # Scale each unique set of partial connections to total FL_portion + TL_portion = 2
+        # Change appropriate columns' data types to float. Mixed integers seemed to make these "objects"
+        connection_df_ni_names = connection_df_ni_names.astype({'FL_proportions': 'float', 'TL_proportions': 'float', 'p_partial': 'float'})        
+        
+        # Group according to unique connections and sum all float columns
+        connection_df_ni_names_unique = connection_df_ni_names.groupby(['FromLayer','ToLayer']).sum()
+        connection_df_ni_names_unique = connection_df_ni_names_unique.reset_index()
+
+        # I am not a perfectionist but I work with a mathematician and want to be exact, thus
+        connection_df_ni_names_unique = connection_df_ni_names_unique.rename(columns={'p_partial':'p_total'})
+        
+        # Scale to final p value
+        connection_df_ni_names_unique['p'] = (connection_df_ni_names_unique['p_total'] * 2) / \
+            (connection_df_ni_names_unique['FL_proportions'] + connection_df_ni_names_unique['TL_proportions'])
+        
+
+        return connection_df_ni_names_unique
 
 
 def show_cortex():
@@ -793,7 +878,7 @@ if __name__ == "__main__":
     n_background_inhibition_for_inhibitory_neurons = 180    
 
     # Connections
-    use_all_csv_data = True
+    use_all_csv_data = False
 
     '''
     End of user input
