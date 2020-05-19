@@ -575,18 +575,15 @@ class Connections:
         
         # Map exc_df and inh_df to valid format inhibitory and excitatory connections in each layer
         self.excitatory_connections_df = self.get_local_connection_df(exc_df, area_name, 
-                                            layer_name_mapping_df_full, requested_layers,
-                                            layer_name_mapping_df_groups, use_all_csv_data)
+                                            layer_name_mapping_df_full, layer_name_mapping_df_groups, use_all_csv_data)
 
         self.inhibitory_connections_df = self.get_local_connection_df(inh_df, area_name, 
-                                            layer_name_mapping_df_full, requested_layers,
-                                            layer_name_mapping_df_groups, use_all_csv_data)
-        pdb.set_trace()
+                                            layer_name_mapping_df_full, layer_name_mapping_df_groups, use_all_csv_data)
+
         # Generate connections
-        self.anatomy_config_df_new_groups_new_synapses = self.generate_synapses()
+        self.anatomy_config_df_new_groups_new_synapses = self.generate_synapses(area_object, NG_new)
 
-
-    def generate_synapses(self):
+    def generate_synapses(self, area_object, NG_new):
         '''
         generate_synapses function
         -for each origin and target group, set receptor,pre_syn_idx,post_syn_idx by layer and compartment,syn_type,p,n,
@@ -595,6 +592,10 @@ class Connections:
         '''
 
         # Unpack for this method
+        layer_mapping_df = area_object.layer_name_mapping_df_groups
+        inhibitory_proportions_df = NG_new.inhibitory_proportions_df
+        excitatory_proportions_df = NG_new.excitatory_proportions_df
+
         replace_existing_cell_groups = self.replace_existing_cell_groups
         excitatory_connections_df = self.excitatory_connections_df 
         inhibitory_connections_df = self.inhibitory_connections_df 
@@ -614,15 +615,114 @@ class Connections:
             # start_connection_index = int(existing_connection['idx'].values[-1]) + 1
             start_index = anatomy_config_df_new_groups.groupby([0]).get_group('S').index[-1] + 1
 
-        # Count number of new connections, ie number of new rows
+        # Count number of new connections, ie number of new rows.
+        index_excitatory_s = excitatory_proportions_df.fillna(0).astype(bool).sum()
+        index_inhibitory_s = inhibitory_proportions_df.fillna(0).astype(bool).sum()
+        
+        layerIdx2layerNames_dict = dict(set(zip(layer_mapping_df['layer_idx'], layer_mapping_df['requested_layers'])))
 
-        pdb.set_trace()
+        # N connections = Sum of (N source layer neuron groups * N target layer neuron groups) over all neuron groups
+        # Number of excitatory layerwise connections FromLayer (NELCF)
+        NELCF_s = excitatory_connections_df['FromLayer'].replace(layerIdx2layerNames_dict).replace(index_excitatory_s.to_dict())
+        NELCT_s = excitatory_connections_df['ToLayer'].replace(layerIdx2layerNames_dict).replace(index_excitatory_s.to_dict())
+        NILCF_s = inhibitory_connections_df['FromLayer'].replace(layerIdx2layerNames_dict).replace(index_inhibitory_s.to_dict())
+        NILCT_s = inhibitory_connections_df['ToLayer'].replace(layerIdx2layerNames_dict).replace(index_inhibitory_s.to_dict())
+        N_rows_EE =  np.sum(NELCF_s * NELCT_s) 
+        N_rows_EI =  np.sum(NELCF_s * NILCT_s) 
+        N_rows_IE =  np.sum(NILCF_s * NELCT_s)         
+        N_rows_II =  np.sum(NILCF_s * NILCT_s) 
+        N_rows = N_rows_EE + N_rows_EI + N_rows_IE + N_rows_II
+        # Generate df for holding the connections. Add indices here to preallocate memory
+        indices = start_index + np.arange(N_rows)      
+        syn_df = pd.DataFrame(columns=connection_columns, index=indices)
 
-        pass
+        # Now we go for the cell groups. First let's set the identical values
+        syn_df.row_type = 'S'
+        syn_df.syn_type = 'Depressing'
+        syn_df.n = 1
+        syn_df.monitors = syn_df.load_connection = syn_df.save_connection = syn_df.custom_weight = '--'
+
+        # Get neuron groups for their index search below
+        cell_group_columns = anatomy_config_df_new_groups.loc[anatomy_config_df_new_groups.groupby([0]).get_group('G').index[0]-1,:].values
+        existing_neuron_groups_df = anatomy_config_df_new_groups.groupby([0]).get_group('G')
+        existing_neuron_groups_df.columns = cell_group_columns
+
+        # Add one layer at a time starting from L1
+        current_connection_index = start_index
+        layerNames2layerIdx_dict = dict(map(reversed, layerIdx2layerNames_dict.items()))
+        
+        # Set 'receptor', 'pre_syn_idx', 'post_syn_idx', 'p'
+        # Excitatory connections
+        syn_df, current_connection_index = self._set_connection_parameters(syn_df, 
+            existing_neuron_groups_df, excitatory_connections_df, excitatory_proportions_df,  
+            inhibitory_proportions_df, current_connection_index, layerIdx2layerNames_dict, 
+            receptor_type='ge')
+        
+        # Inhibitory connections
+        syn_df, current_connection_index = self._set_connection_parameters(syn_df, 
+            existing_neuron_groups_df, inhibitory_connections_df, excitatory_proportions_df,  
+            inhibitory_proportions_df, current_connection_index, layerIdx2layerNames_dict, 
+            receptor_type='gi')
+
+        # Sort to 1-source neuron group, 2-E,I, 3-target neuron group
+        # Because neuron groups are numbered from layer 1 downwards, E first, we get
+        # sorted as source layer E -> target neuron group  E, I -> source layer I -> target neuron group E, I
+        syn_df = syn_df.sort_values(by=['pre_syn_idx', 'receptor', 'post_syn_idx'])
+
+        # Change column names
+        syn_df.columns = anatomy_config_df_new_groups.columns
+
+        # Get anat config df first new connection index
+        anatomy_config_df_beginning = anatomy_config_df_new_groups.iloc[:start_index,:] 
+        
+        # Concatenate, ignore sorted syn_df index
+        anatomy_config_df_new = pd.concat([anatomy_config_df_beginning, syn_df], ignore_index=True)
+
+        return anatomy_config_df_new
+
+    def _set_connection_parameters(self, syn_df, existing_neuron_groups_df, connections_df, 
+            excitatory_proportions_df, inhibitory_proportions_df, current_connection_index, 
+            layerIdx2layerNames_dict, receptor_type=None):
+            
+        receptor = receptor_type
+        for conn_idx in connections_df.index.values:
+
+            pre_layer = layerIdx2layerNames_dict[connections_df.loc[conn_idx,'FromLayer']]
+            post_layer = layerIdx2layerNames_dict[connections_df.loc[conn_idx,'ToLayer']]
+            probability = connections_df.loc[conn_idx,'p']
+
+            #Create logic for switching between e and i proportions
+            if receptor == 'ge':
+                primary_proportion = excitatory_proportions_df
+            elif receptor == 'gi':
+                primary_proportion = inhibitory_proportions_df
+
+            for current_pre_type in  \
+                primary_proportion.index[primary_proportion[pre_layer].fillna(0).astype(bool).values].values: 
+                # Get pre group idx
+                pre_neuron_subtype = pre_layer + '_' + current_pre_type
+
+                for current_post_type in  \
+                    excitatory_proportions_df.index[excitatory_proportions_df[post_layer].fillna(0).astype(bool).values].values.tolist() + \
+                    inhibitory_proportions_df.index[inhibitory_proportions_df[post_layer].fillna(0).astype(bool).values].values.tolist():                
+                    # Get post neuron subgroup name
+                    post_neuron_subtype = post_layer + '_' + current_post_type
+
+
+                    syn_df.loc[current_connection_index,'receptor'] = receptor
+                    syn_df.loc[current_connection_index,'pre_syn_idx'] = \
+                        existing_neuron_groups_df.loc[existing_neuron_groups_df['neuron_subtype'] == pre_neuron_subtype, 'idx'].values[0]
+                    syn_df.loc[current_connection_index,'post_syn_idx'] = \
+                        existing_neuron_groups_df.loc[existing_neuron_groups_df['neuron_subtype'] == post_neuron_subtype, 'idx'].values[0]
+
+                    syn_df.loc[current_connection_index,'p'] = probability
+                    current_connection_index += 1
+
+        # pdb.set_trace()
+        return syn_df, current_connection_index
 
     def get_local_connection_df(self, ni_df, area_name, layer_name_mapping_df_full, 
-                                requested_layers,layer_name_mapping_df_groups,
-                                use_all_csv_data):
+                                layer_name_mapping_df_groups, use_all_csv_data):
         '''
         Turn neuroinformatics connection df to useful connection_df
 
@@ -780,7 +880,8 @@ if __name__ == "__main__":
     Start of user input
     Copy and comment/uncomment examples/your own versions by need. If python gives exception, look first your own syntax below.
     '''
-
+    TÄHÄN JÄIT: TARKISTA ASSUME AUTOCONNECTIONS LAYEREIDEN SISÄLLÄ, PUUTTUI MM SS L1 LÄHTÖISET KUN
+    EIVÄT OLE NI CSV FILESSÄ
     area_name='V1' # Don't change this.
     # requested_layers=['L1', 'L23', 'L4A','L4B', 'L4CA', 'L4CB','L5','L6'] # You should be able start from L4CA or B alone for testing
     requested_layers=['L1', 'L23', 'L4A','L4B', 'L4C','L5','L6'] # You should be able start from L4CA or B alone for testing
@@ -877,8 +978,9 @@ if __name__ == "__main__":
     n_background_inputs_for_inhibitory_neurons = 500
     n_background_inhibition_for_inhibitory_neurons = 180    
 
-    # Connections
-    use_all_csv_data = False
+    # Connections. You can use only a subset of layers in ni csv data matching your requested layers or alternatively
+    # you can use all csv data, including the sublayers and CO compartments.
+    use_all_csv_data = True
 
     '''
     End of user input
@@ -916,11 +1018,17 @@ if __name__ == "__main__":
     NG_new = Groups(  CxC, V1, requested_cell_types_and_proportions, cell_type_data_source, cell_type_data_folder_name, 
                 cell_type_data_file_name, request_monitors,requested_background_input)
 
-    NG_new.anatomy_config_df_new.to_csv(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.csv'), header=False, index=False)
-    # For debugging we write this to excel, too
-    NG_new.anatomy_config_df_new.to_excel(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.xlsx'), header=False, index=False)
-    # For cxsystem we write this to json, too
-    NG_new.anatomy_config_df_new.to_json(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.json'))
+    # NG_new.anatomy_config_df_new.to_csv(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.csv'), header=False, index=False)
+    # # For debugging we write this to excel, too
+    # NG_new.anatomy_config_df_new.to_excel(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.xlsx'), header=False, index=False)
+    # # For cxsystem we write this to json, too
+    # NG_new.anatomy_config_df_new.to_json(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.json'))
 
     Conn_new = Connections(CxC, V1, NG_new, use_all_csv_data)
+
+    Conn_new.anatomy_config_df_new_groups_new_synapses.to_csv(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.csv'), header=False, index=False)
+    # For debugging we write this to excel, too
+    Conn_new.anatomy_config_df_new_groups_new_synapses.to_excel(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.xlsx'), header=False, index=False)
+    # For cxsystem we write this to json, too
+    Conn_new.anatomy_config_df_new_groups_new_synapses.to_json(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.json'))
 
