@@ -50,10 +50,15 @@ from cxsystem2.core.tools import  read_config_file
 
 import pdb
 
+# System-dependent global variables
 root_path = r'C:\Users\Simo\Laskenta\PythonUtilities\MacV1Buildup'
 path_to_tables = os.path.join(root_path, 'tables')
 path_to_ni_csv = os.path.join(root_path, 'ni_csv_copy')
 path_to_config_files = os.path.join(root_path, 'config_files')
+
+# Non-system-dependent gloabl variables
+suffix_for_new_files = '_cxc'
+
 
 # TODO Instead of passing objects from class to class, consider inheritance
 
@@ -88,6 +93,40 @@ class Config:
             raise NotImplementedError('Unexpected filename extension')
 
         return df
+
+    def get_data_from_anat_df(self, anat_df, datatype='G'):
+
+        # Get and set column names for neuron groups
+        data_columns = anat_df.loc[anat_df.groupby([0]).get_group(datatype).index[0]-1,:].values
+        neuron_groups_df = anat_df.groupby([0]).get_group(datatype)
+        neuron_groups_df.columns = data_columns
+
+        return neuron_groups_df, data_columns
+
+    def GetNeuronTypes(self):
+        neuron_types_df = self.read_data_from_tables(path_to_tables, 'neuron_group_ephys_templates.xlsx')
+        # Pack to easily searchable dataframes
+
+        cutoff_index = neuron_types_df.loc[neuron_types_df.iloc[:,0]=='CompartmentalNeurons'].index.values[0]
+        PointNeurons_df = neuron_types_df.iloc[:cutoff_index - 1, :]
+        CompartmentalNeurons_df = neuron_types_df.iloc[cutoff_index + 1:, :]
+        new_header = CompartmentalNeurons_df.iloc[0]
+        CompartmentalNeurons_df = CompartmentalNeurons_df[1:]
+        CompartmentalNeurons_df.columns = new_header
+
+        return PointNeurons_df, CompartmentalNeurons_df
+
+    def WriteConfigFiles(self, config_dataframe_df, filename_in, csv=False, json=False, xlsx=False):
+
+        assert csv or json or xlsx, 'Came on, you need at least one type active to write something'
+
+        filename, file_extension = os.path.splitext(filename_in)
+        config_dataframe_df.to_csv(os.path.join(path_to_config_files,filename + suffix_for_new_files + '.csv'), header=False, index=False)
+        # For debugging we write this to excel, too
+        config_dataframe_df.to_excel(os.path.join(path_to_config_files,filename + suffix_for_new_files + '.xlsx'), header=False, index=False)
+        # For cxsystem we write this to json, too
+        config_dataframe_df.to_json(os.path.join(path_to_config_files,filename + suffix_for_new_files + '.json'))
+    
 
 
 class Area:
@@ -271,6 +310,71 @@ class Groups:
 
         # Get df with neuron groups for anatomy df, return new df to object
         self.anatomy_config_df_new = self.generate_cell_groups(CxC, area_object, requested_cell_types_and_proportions)
+        self.physiology_df_with_subgroups = self.spawn_subgroup_physiology(CxC)
+
+    def spawn_subgroup_physiology(self, CxC):
+        '''
+        Spawn subtypes physiology
+
+        Read canonical types from excel
+        Read example physiol.csv to df
+        Strip old subtypes from physiol df
+        Get unique subtypes from anatomy_config_df_new
+        Add subtypes one-by-one to physiol df
+        Return physiol df
+        '''
+        # Unpack for current method
+        physiology_df = CxC.physiology_config_df
+        anatomy_config_df_new = self.anatomy_config_df_new
+        existing_neuron_groups, cell_group_columns = CxC.get_data_from_anat_df(anatomy_config_df_new, 'G') 
+        PointNeurons_df, CompartmentalNeurons_df = CxC.GetNeuronTypes()
+        
+        assert '### NEURON GROUP PARAMETERS ###' in physiology_df[0].values, \
+            '''Sorry but you need to mark the cut point (start of neuron subgroup ephys properties) 
+            in the physiology configuration file with "### NEURON GROUP PARAMETERS ###", because 
+            the guy who programmed me is dead-lazy'''
+        cutoff_index = physiology_df.loc[physiology_df[0]=='### NEURON GROUP PARAMETERS ###'].index.values[0]
+
+        # Sniff physiology_df for input group, assuming INPUTGROUPNAME,,,\,,, in the csv file
+        df_to_sniff = physiology_df.loc[cutoff_index:]
+        empty_rows_following_cutoff = df_to_sniff[df_to_sniff.isnull().all(axis=1)].index.values - cutoff_index
+        if empty_rows_following_cutoff[0] == 2:
+            input_group = df_to_sniff.iloc[1:2,0].values[0]
+            assert isinstance(input_group, str), f'Not typical input group expression in physiology config at line {cutoff_index + 1}, aborting...'
+            print(f"Warning: Adding assumed input group {input_group}")
+            physiology_df_stub = physiology_df.loc[:cutoff_index + 2]
+        else:
+            physiology_df_stub = physiology_df.loc[:cutoff_index]
+
+        unique_subtypes = existing_neuron_groups['neuron_subtype'].unique()
+        collect_subtype_dataframes_list = []
+
+        for neuron_subtype in unique_subtypes:
+            # Get matching type
+            neuron_type = existing_neuron_groups.groupby(['neuron_subtype']).get_group(neuron_subtype)['neuron_type'].values[0]
+
+            if neuron_type in PointNeurons_df.columns: 
+                keys = PointNeurons_df['Key']
+                values = PointNeurons_df[neuron_type]
+            elif neuron_type in CompartmentalNeurons_df.columns:
+                keys = CompartmentalNeurons_df['Key']
+                values = CompartmentalNeurons_df[neuron_type]
+            else:
+                raise NotImplementedError('neuron_type not recognized, requested types do not match neuron_group_ephys_templates? Aborting...')
+
+            # Create subtype df
+            data = [[neuron_subtype], keys.values.tolist(), values.values.tolist()]
+            subtype_ephys_df = pd.DataFrame(data).T
+            # Append empty row to the end of df
+            subtype_ephys_df = subtype_ephys_df.append(pd.Series(), ignore_index=True)
+            # => append to list
+            collect_subtype_dataframes_list.append(subtype_ephys_df)
+        all_subtype_ephys_df = pd.concat(collect_subtype_dataframes_list,ignore_index=True)    
+        # Append to physiology_df_stub
+        physiology_df_with_subgroups = pd.concat([physiology_df_stub, all_subtype_ephys_df],ignore_index=True)
+
+        return physiology_df_with_subgroups
+
 
     def generate_cell_groups(self, CxC, area_object, requested_cell_types_and_proportions):
         '''
@@ -295,9 +399,7 @@ class Groups:
         layer_mapping_df = self.layer_mapping_df 
 
         # Get and set column names for neuron groups
-        cell_group_columns = anatomy_config_df.loc[anatomy_config_df.groupby([0]).get_group('G').index[0]-1,:].values
-        existing_neuron_groups = anatomy_config_df.groupby([0]).get_group('G')
-        existing_neuron_groups.columns = cell_group_columns
+        existing_neuron_groups, cell_group_columns = CxC.get_data_from_anat_df(anatomy_config_df, 'G')
 
         # Get starting index for cell groups and row indices for anat df
         if CxC.replace_existing_cell_groups:
@@ -581,9 +683,9 @@ class Connections:
                                             layer_name_mapping_df_full, layer_name_mapping_df_groups, use_all_csv_data)
 
         # Generate connections
-        self.anatomy_config_df_new_groups_new_synapses = self.generate_synapses(area_object, NG_new)
+        self.anatomy_config_df_new_groups_new_synapses = self.generate_synapses(CxC, area_object, NG_new)
 
-    def generate_synapses(self, area_object, NG_new):
+    def generate_synapses(self, CxC, area_object, NG_new):
         '''
         generate_synapses function
         -for each origin and target group, set receptor,pre_syn_idx,post_syn_idx by layer and compartment,syn_type,p,n,
@@ -603,9 +705,7 @@ class Connections:
         # layer_mapping_df = self.layer_mapping_df
 
         # Get and set column names for connections
-        connection_columns = anatomy_config_df_new_groups.loc[anatomy_config_df_new_groups.groupby([0]).get_group('S').index[0]-1,:].values
-        existing_connection = anatomy_config_df_new_groups.groupby([0]).get_group('S')
-        existing_connection.columns = connection_columns
+        existing_connection, connection_columns = CxC.get_data_from_anat_df(anatomy_config_df, 'S')
 
         # Get starting index for connections and row indices for anat df
         if CxC.replace_existing_cell_groups:
@@ -640,12 +740,11 @@ class Connections:
         syn_df.row_type = 'S'
         syn_df.syn_type = 'Depressing'
         syn_df.n = 1
-        syn_df.monitors = syn_df.load_connection = syn_df.save_connection = syn_df.custom_weight = '--'
+        syn_df.monitors = syn_df.custom_weight = '--'
+        syn_df.load_connection = syn_df.save_connection = 0
 
         # Get neuron groups for their index search below
-        cell_group_columns = anatomy_config_df_new_groups.loc[anatomy_config_df_new_groups.groupby([0]).get_group('G').index[0]-1,:].values
-        existing_neuron_groups_df = anatomy_config_df_new_groups.groupby([0]).get_group('G')
-        existing_neuron_groups_df.columns = cell_group_columns
+        existing_neuron_groups_df, cell_group_columns = CxC.get_data_from_anat_df(anatomy_config_df_new_groups, 'G')
 
         # Add one layer at a time starting from L1
         current_connection_index = start_index
@@ -718,7 +817,6 @@ class Connections:
                     syn_df.loc[current_connection_index,'p'] = probability
                     current_connection_index += 1
 
-        # pdb.set_trace()
         return syn_df, current_connection_index
 
     def get_local_connection_df(self, ni_df, area_name, layer_name_mapping_df_full, 
@@ -880,8 +978,7 @@ if __name__ == "__main__":
     Start of user input
     Copy and comment/uncomment examples/your own versions by need. If python gives exception, look first your own syntax below.
     '''
-    TÄHÄN JÄIT: TARKISTA ASSUME AUTOCONNECTIONS LAYEREIDEN SISÄLLÄ, PUUTTUI MM SS L1 LÄHTÖISET KUN
-    EIVÄT OLE NI CSV FILESSÄ
+
     area_name='V1' # Don't change this.
     # requested_layers=['L1', 'L23', 'L4A','L4B', 'L4CA', 'L4CB','L5','L6'] # You should be able start from L4CA or B alone for testing
     requested_layers=['L1', 'L23', 'L4A','L4B', 'L4C','L5','L6'] # You should be able start from L4CA or B alone for testing
@@ -961,7 +1058,9 @@ if __name__ == "__main__":
     anatomy_config_file_name = 'pytest_anatomy_config.csv'
     physiology_config_file_name = 'pytest_physiology_config.csv' # anatomy and physiology filenames sometimes diverge
 
-    
+    # Own additional data files
+    neuron_group_ephys_templates_filename = 'neuron_group_ephys_templates.xlsx'
+
     # Activate correct selection. These data provide proportions of distinct cell groups in each layer.
     # Markram data, rat S1
     # cell_type_data_source = 'HBP'
@@ -982,10 +1081,12 @@ if __name__ == "__main__":
     # you can use all csv data, including the sublayers and CO compartments.
     use_all_csv_data = True
 
+    # TODO: Assume layer autoconnections flag
     '''
     End of user input
     '''
     # TODO: ASSERT excitatory_proportions IS EITHER EMPTY, OR ROWS MATCHES N NEURON TYPES AND COLUMN NAMES MATCHES THE REQUESTED LAYERS
+    # TODO: Bring fixed filenames to user input above or here.
 
     if cell_type_data_source == 'HBP':
         cell_type_data_folder_name='hbp_data'; cell_type_data_file_name='layer_download.json'
@@ -1013,22 +1114,25 @@ if __name__ == "__main__":
     V1 = Area(CxC, area_name=area_name, requestedVFradius=requestedVFradius, center_ecc=center_ecc, requested_layers=requested_layers)
 
     # Add anatomy and physiology config files to start with
-    suffix_for_new_file = '_cxc'
-
     NG_new = Groups(  CxC, V1, requested_cell_types_and_proportions, cell_type_data_source, cell_type_data_folder_name, 
                 cell_type_data_file_name, request_monitors,requested_background_input)
 
-    # NG_new.anatomy_config_df_new.to_csv(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.csv'), header=False, index=False)
+    # NG_new.anatomy_config_df_new.to_csv(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_files + '.csv'), header=False, index=False)
     # # For debugging we write this to excel, too
-    # NG_new.anatomy_config_df_new.to_excel(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.xlsx'), header=False, index=False)
+    # NG_new.anatomy_config_df_new.to_excel(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_files + '.xlsx'), header=False, index=False)
     # # For cxsystem we write this to json, too
-    # NG_new.anatomy_config_df_new.to_json(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.json'))
+    # NG_new.anatomy_config_df_new.to_json(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_files + '.json'))
 
     Conn_new = Connections(CxC, V1, NG_new, use_all_csv_data)
 
-    Conn_new.anatomy_config_df_new_groups_new_synapses.to_csv(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.csv'), header=False, index=False)
+    Conn_new.anatomy_config_df_new_groups_new_synapses.to_csv(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_files + '.csv'), header=False, index=False)
     # For debugging we write this to excel, too
-    Conn_new.anatomy_config_df_new_groups_new_synapses.to_excel(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.xlsx'), header=False, index=False)
+    Conn_new.anatomy_config_df_new_groups_new_synapses.to_excel(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_files + '.xlsx'), header=False, index=False)
     # For cxsystem we write this to json, too
-    Conn_new.anatomy_config_df_new_groups_new_synapses.to_json(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_file + '.json'))
-
+    Conn_new.anatomy_config_df_new_groups_new_synapses.to_json(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_files + '.json'))
+    
+    # Write physiology out
+    CxC.physiology_config_df.to_excel(os.path.join(path_to_config_files,physiology_config_file_name[:-4] + '.xlsx'), header=False, index=False)
+    NG_new.physiology_df_with_subgroups.to_excel(os.path.join(path_to_config_files,physiology_config_file_name[:-4] + suffix_for_new_files + '.xlsx'), header=False, index=False)
+    # pdb.set_trace()
+    CxC.WriteConfigFiles(NG_new.physiology_df_with_subgroups, physiology_config_file_name, csv=True, json=False, xlsx=True)
