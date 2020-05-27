@@ -50,15 +50,20 @@ from cxsystem2.core.tools import  read_config_file
 
 import pdb
 
-# System-dependent global variables
-root_path = r'C:\Users\Simo\Laskenta\Git_Repos\CxConstructor\MacV1Buildup'
-path_to_tables = os.path.join(root_path, 'tables')
-path_to_ni_csv = os.path.join(root_path, 'ni_csv_copy')
-path_to_config_files = os.path.join(root_path, 'config_files')
+# System-dependent constant paths
+ROOT_PATH = r'C:\Users\Simo\Laskenta\Git_Repos\CxConstructor\MacV1Buildup'
+PATH_TO_TABLES = os.path.join(ROOT_PATH, 'tables')
+PATH_TO_NI_CSV = os.path.join(ROOT_PATH, 'ni_csv_copy')
+PATH_TO_CONFIG_FILES = os.path.join(ROOT_PATH, 'config_files')
 
 # Constant filenames
-table1_data_filename = 'table1_data.csv'
-table2_data_filename = 'table2_data.csv'
+TABLE1_DATA_FILENAME = 'table1_data.csv'
+TABLE2_DATA_FILENAME = 'table2_data.csv'
+LAYER_NAME_MAP_FILENAME = 'layer_name_mapping_V1.xlsx'
+NEURON_COMPARTMENT_FILENAME = 'PC_apical_dendrites.xlsx'
+NEURON_GROUP_EPHYS_TEMPLATE_FILENAME = 'neuron_group_ephys_templates.xlsx'
+LOCAL_EXCITATORY_CONNECTION_FILENAME = 'connections_local_excitatory.csv'
+LOCAL_INHIBITORY_CONNECTION_FILENAME = 'connections_local_inhibitory.csv'
 
 
 class Config:
@@ -79,7 +84,7 @@ class Config:
 
     @classmethod
     def get_neuron_types(cls):
-        neuron_types_df = cls.read_data_from_tables(path_to_tables, 'neuron_group_ephys_templates.xlsx')
+        neuron_types_df = cls.read_data_from_tables(PATH_TO_TABLES, NEURON_GROUP_EPHYS_TEMPLATE_FILENAME)
         # Pack to easily searchable dataframes
 
         cutoff_index = neuron_types_df.loc[neuron_types_df.iloc[:,0]=='CompartmentalNeurons'].index.values[0]
@@ -108,7 +113,7 @@ class Config:
 
     @classmethod
     def get_neuroinformatics_data(cls, table_filename, set_index=None):
-        table_df = cls.read_data_from_tables(path_to_tables, table_filename)
+        table_df = cls.read_data_from_tables(PATH_TO_TABLES, table_filename)
         table_df = table_df.set_index(set_index) 
         return table_df
 
@@ -120,11 +125,11 @@ class Config:
         filename, file_extension = os.path.splitext(filename_in)
 
         if csv:
-            config_dataframe_df.to_csv(os.path.join(path_to_config_files,filename + '.csv'), header=False, index=False)
+            config_dataframe_df.to_csv(os.path.join(PATH_TO_CONFIG_FILES,filename + '.csv'), header=False, index=False)
         if xlsx:
-            config_dataframe_df.to_excel(os.path.join(path_to_config_files,filename + '.xlsx'), header=False, index=False)
+            config_dataframe_df.to_excel(os.path.join(PATH_TO_CONFIG_FILES,filename + '.xlsx'), header=False, index=False)
         if json:
-            config_dataframe_df.to_json(os.path.join(path_to_config_files,filename + '.json'))
+            config_dataframe_df.to_json(os.path.join(PATH_TO_CONFIG_FILES,filename + '.json'))
     
 
 class Area(Config):
@@ -139,11 +144,11 @@ class Area(Config):
         self.requested_layers=requested_layers
 
         # Read connection table sublayer to Table2 layer mapping. Contains assumed proportions for Ncells/sublayer
-        layer_name_mapping_df_orig = self.read_data_from_tables(path_to_tables, 'layer_name_mapping_V1.xlsx')
+        layer_name_mapping_df_orig = self.read_data_from_tables(PATH_TO_TABLES, LAYER_NAME_MAP_FILENAME)
         # Drop comments
         layer_name_mapping_df_orig = layer_name_mapping_df_orig.drop(columns='comments')
         self.layer_name_mapping_df_orig = layer_name_mapping_df_orig
-        self.PC_apical_dendrites = self.read_data_from_tables(path_to_tables, 'PC_apical_dendrites.xlsx')
+        self.PC_apical_dendrites = self.read_data_from_tables(PATH_TO_TABLES, NEURON_COMPARTMENT_FILENAME)
 
         # Check layer names for validity: are they mapped in the sublayer to layer mapping file
         # valid_layers = layer_name_mapping_df_orig['allowed_requested_layers'].tolist()
@@ -634,7 +639,7 @@ class Groups(Config):
             proportions_df =  pd.DataFrame(data=proportions, index=types)
 
         elif cell_type_data_source: # If given
-            fullpath = os.path.join(path_to_tables, cell_type_data_folder_name)
+            fullpath = os.path.join(PATH_TO_TABLES, cell_type_data_folder_name)
             cell_type_df = self.read_data_from_tables(fullpath, cell_type_data_file_name)
 
             if cell_type_data_source=='HBP' or cell_type_data_source=='Markram':
@@ -662,8 +667,8 @@ class Connections(Config):
                 
         # Read data from files.
         # Read ni csv into dataframe
-        exc_df = self.read_data_from_tables(path_to_ni_csv, 'connections_local_excitatory.csv')
-        inh_df = self.read_data_from_tables(path_to_ni_csv, 'connections_local_inhibitory.csv')
+        exc_df = self.read_data_from_tables(PATH_TO_NI_CSV, LOCAL_EXCITATORY_CONNECTION_FILENAME)
+        inh_df = self.read_data_from_tables(PATH_TO_NI_CSV, LOCAL_INHIBITORY_CONNECTION_FILENAME)
         area_name = area_object.area_name
         requested_layers = area_object.requested_layers
         # layer_mapping_df = NG_new.layer_mapping_df
@@ -1105,11 +1110,11 @@ if __name__ == "__main__":
         'n_background_inhibition_for_inhibitory_neurons':n_background_inhibition_for_inhibitory_neurons}
 
     # Set Config class variables
-    Config.anatomy_config_df = read_config_file(os.path.join(path_to_config_files,anatomy_config_file_name))
-    Config.physiology_config_df = read_config_file(os.path.join(path_to_config_files,physiology_config_file_name))  
+    Config.anatomy_config_df = read_config_file(os.path.join(PATH_TO_CONFIG_FILES,anatomy_config_file_name))
+    Config.physiology_config_df = read_config_file(os.path.join(PATH_TO_CONFIG_FILES,physiology_config_file_name))  
     Config.replace_existing_cell_groups = replace_existing_cell_groups  
-    Config.table1_df = Config.get_neuroinformatics_data(table1_data_filename, set_index='stat')
-    Config.table2_df = Config.get_neuroinformatics_data(table2_data_filename, set_index='layer')
+    Config.table1_df = Config.get_neuroinformatics_data(TABLE1_DATA_FILENAME, set_index='stat')
+    Config.table2_df = Config.get_neuroinformatics_data(TABLE2_DATA_FILENAME, set_index='layer')
 
     # CxC = Config()
     V1 = Area(area_name=area_name, requestedVFradius=requestedVFradius, center_ecc=center_ecc, requested_layers=requested_layers)
@@ -1118,11 +1123,11 @@ if __name__ == "__main__":
     NG_new = Groups(V1, requested_cell_types_and_proportions, cell_type_data_source, cell_type_data_folder_name, 
                 cell_type_data_file_name, request_monitors,requested_background_input)
 
-    # NG_new.anatomy_config_df_new.to_csv(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_files + '.csv'), header=False, index=False)
+    # NG_new.anatomy_config_df_new.to_csv(os.path.join(PATH_TO_CONFIG_FILES,anatomy_config_file_name[:-4] + suffix_for_new_files + '.csv'), header=False, index=False)
     # # For debugging we write this to excel, too
-    # NG_new.anatomy_config_df_new.to_excel(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_files + '.xlsx'), header=False, index=False)
+    # NG_new.anatomy_config_df_new.to_excel(os.path.join(PATH_TO_CONFIG_FILES,anatomy_config_file_name[:-4] + suffix_for_new_files + '.xlsx'), header=False, index=False)
     # # For cxsystem we write this to json, too
-    # NG_new.anatomy_config_df_new.to_json(os.path.join(path_to_config_files,anatomy_config_file_name[:-4] + suffix_for_new_files + '.json'))
+    # NG_new.anatomy_config_df_new.to_json(os.path.join(PATH_TO_CONFIG_FILES,anatomy_config_file_name[:-4] + suffix_for_new_files + '.json'))
 
     Conn_new = Connections(V1, NG_new, use_all_csv_data)
 
