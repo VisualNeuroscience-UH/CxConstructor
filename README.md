@@ -1,2 +1,2 @@
-# Utilities
-Simo's personal tools for use with python
+# CxConstructor
+Tools to build cortical microcircuit systems for CxSystem2
