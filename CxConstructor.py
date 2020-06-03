@@ -1,46 +1,20 @@
 # -*- coding: utf-8 -*-
 '''
-Construct macaque visual cortex model.
+Construct macaque visual cortex model using existing configuration files.
 
 This module input your definitions after the if __name__ == "__main__":
 and constructs model of macaque V1. It makes a query to neuroinfo csv data 
 and tables from Vanni et al Cerebral Cortex 2020. It uses these data to create
-cell groups and connections into anatomical csv file for CxSystem2 package.
+cell groups and connections into anatomical and physiological csv files
+for CxSystem2 package.
 
 Classes
-    Config: This class instance contains general objects, concerning all areas. It is here for taking data around and including general methods.
+    Config: This class contains general utility methods. 
     Area:   This class contains area-level data and methods
     Group:  Neuron group level data and methods
-    Connections:    Generate synapses object, which includes the new anatomy df with connections
-
-Design
-    -read ni csv into dataframe, Table1 and Table2
-    -input layers,  
-        
-    The layer_name_mapping excel file contains eg sublayers 4Cm, L6A etc. Cell proportions in sublayers are simply
-    1/(N sub layers). The blob/interblob relation is estimated to be 0.4/0.6, according to surface areas at 5 deg ecc (Livingstone 1984 JNeurosci)
-
-    -check requested names for validity
-
-    -read in Table 1 and Table 2 data
-    -map the N layers to valid Table 2 layers, 
-
-    -read in anat csv to start with
-
-    -call generate_cell_groups to get df with neuron group names, numbers by layer and type/subtype
-    -call cell_group_row for anat csv row output for cell groups
-
-    -map each row in the ni csv file into layer of origin and termination, set strength
-    -set origin groups according to subgroups
-    -set target groups according to subgroups
-    -call generate_synapses function
-    -call synapse_row
-
-    -write cell groups and synapses into the existing anat csv file with _cxc suffix
-
-    -call show_cortex
-
+    Connections:    Generate synapses object, which includes the new anatomy df with connections. Use ni csv data.
 '''
+
 import numpy as np
 from matplotlib import pyplot as plt
 import os
@@ -64,13 +38,22 @@ NEURON_COMPARTMENT_FILENAME = 'PC_apical_dendrites.xlsx'
 NEURON_GROUP_EPHYS_TEMPLATE_FILENAME = 'neuron_group_ephys_templates.xlsx'
 LOCAL_EXCITATORY_CONNECTION_FILENAME = 'connections_local_excitatory.csv'
 LOCAL_INHIBITORY_CONNECTION_FILENAME = 'connections_local_inhibitory.csv'
+POST_SYN_COMPARTMENTS = 'post_syn_compartments.xlsx'
+POST_SYN_TARGET_CELLTYPES = 'post_syn_target_celltypes.xlsx'
 
+# Constant values
+N_MAX_NEW_CONNECTIONS = 1000
+N_SYNAPSES_PER_CONNECTION = 1
+SYNAPSE_TYPE = 'Depressing'
+_CELLTYPES = np.array(['PC', 'SS', 'BC', 'MC', 'L1i', 'VPM', 'HH_I', 'HH_E', 'NDNEURON']) # Copied from CxSystem2\cxsystem2\core\physiology_reference.py class NeuronReference
 
 class Config:
 
     '''
     This class contains general objects, concerning all areas and connections. It is here for general data and methods.
     '''
+    # TODO Read all fixed tables to config object at init method
+    
     
     @classmethod
     def get_data_from_anat_config_df(cls, anat_df, datatype='G'):
@@ -118,6 +101,13 @@ class Config:
         return table_df
 
     @staticmethod
+    def pd_string_value2list_of_strings(string_containing_list):
+        list_of_strings = string_containing_list.values.tolist()[0].split(',')
+        # strip spaces
+        list_of_strings = [i.replace(' ','') for i in list_of_strings]
+        return list_of_strings
+
+    @staticmethod
     def write_config_files(config_dataframe_df, filename_in, csv=False, json=False, xlsx=False):
 
         assert csv or json or xlsx, 'Come on, you need at least one type active to write something'
@@ -134,8 +124,9 @@ class Config:
 
 class Area(Config):
     '''
-    This class contains area-level data and methods
+    This class contains area-level data and methods.
     '''
+
     def __init__(self, area_name='V1', requestedVFradius=.1, center_ecc=5, requested_layers=['L1', 'L23', 'L4A','L4B', 'L4CA', 'L4CB','L5','L6']):
         
         self.area_name=area_name
@@ -153,9 +144,8 @@ class Area(Config):
         # Check layer names for validity: are they mapped in the sublayer to layer mapping file
         # valid_layers = layer_name_mapping_df_orig['allowed_requested_layers'].tolist()
         layer_name_mapping_df_orig_search_columns = ['down_mapping1', 'down_mapping2', 'down_mapping3', 'csv_layers']
-        self.layer_name_mapping_df_orig_search_columns = layer_name_mapping_df_orig_search_columns
 
-        valid_layers = self.get_valid_layers(   layer_name_mapping_df_orig, 
+        valid_layers = self.get_valid_layer_names(   layer_name_mapping_df_orig, 
                                                 layer_name_mapping_df_orig_search_columns)
         assert set(requested_layers) - set(valid_layers) == set(), f'Invalid layer names, valid layer names are {valid_layers}'
         self.valid_layers = valid_layers
@@ -165,6 +155,10 @@ class Area(Config):
                                         self.map_requested_layers2valid_layers(
                                         requested_layers, layer_name_mapping_df_orig, 
                                         layer_name_mapping_df_orig_search_columns)
+
+        # Create dictionaries both from layer idx to layer name and layer name to layer idx
+        self.layerIdx2layerNames_dict = dict(set(zip(self.layer_name_mapping_df_groups['layer_idx'], self.layer_name_mapping_df_groups['requested_layers'])))
+        self.layerNames2layerIdx_dict = dict(map(reversed, self.layerIdx2layerNames_dict.items()))
 
         if area_name=='V1':
             # Get proportion V1 of total V1
@@ -238,13 +232,12 @@ class Area(Config):
 
         return layer_name_mapping_df, layer_name_mapping_df_full
 
-    def get_valid_layers(self, layer_name_mapping_df_orig, columns_for_search):
+    def get_valid_layer_names(self, layer_name_mapping_df_orig, columns_for_search):
         '''
         Search layer_name_mapping_V1 through columns csv_layers, and down_mapping1-3.
         Any unique name is valid for request
         '''
-        # Columns for search
-        # columns_for_search = ['down_mapping1', 'down_mapping2', 'down_mapping3', 'csv_layers']
+
         valid_layers = pd.unique(layer_name_mapping_df_orig[columns_for_search].values.ravel('K'))
         return valid_layers
 
@@ -271,7 +264,6 @@ class Groups(Config):
     '''
     Neuron group level data and methods
     '''
-    #TODO: AREA_OBJECT VS SELF.AREA_OBJECT STYLE
 
     def __init__(   self, area_object, requested_cell_types_and_proportions, cell_type_data_source, 
                     cell_type_data_folder_name, cell_type_data_file_name, monitors, bg_inputs):
@@ -281,6 +273,7 @@ class Groups(Config):
 
         self.monitors =  monitors
         self.bg_inputs = bg_inputs
+        self.requested_cell_types = self.get_requested_cell_types(requested_cell_types_and_proportions)
 
         # Unpack for init
         inhibitory_types = requested_cell_types_and_proportions['inhibitory_types']
@@ -297,23 +290,25 @@ class Groups(Config):
         self.excitatory_proportions_df = self.get_proportions_df(   'Glutamatergic',excitatory_proportions, excitatory_types, requested_layers, 
                                                                     cell_type_data_source, cell_type_data_folder_name, cell_type_data_file_name)
 
+        
         # Map cell groups to requested layers
         # Choose layer mappings according to requested layers. 
         # TODO If an entry has two values separated by ";", the two values must be averaged
 
-        # # layer_name_mapping_df_orig = area_object.layer_name_mapping_df_orig # Should be acquired from Area class instance object
-        # # # Map requested layers to allowed neuroinformatics sublayers.
-        # # layer_mapping_df = layer_name_mapping_df_orig.loc[layer_name_mapping_df_orig['allowed_requested_layers'].isin(requested_layers)]
-        # # # Add numerical layer index to layer_mapping_df
-        # # layer_idxs = np.arange(len(requested_layers)) + 1
-        # # layer_mapping_df['layer_idx'] = layer_idxs.tolist()
         self.layer_mapping_df = area_object.layer_name_mapping_df_groups
-
-        # # self.layer_mapping_df = layer_mapping_df
 
         # Get df with neuron groups for anatomy df, return new df to object
         self.anatomy_config_df_new = self.generate_cell_groups(area_object, requested_cell_types_and_proportions)
         self.physiology_df_with_subgroups = self.spawn_subgroup_physiology()
+
+    def get_requested_cell_types(self, requested_cell_types_and_proportions):  
+        '''
+        Get cell types mapped to general type names (eg PC instead of PC1) for mapping to data tables
+        '''
+        requested_cell_types_orig = requested_cell_types_and_proportions['excitatory_types'] + requested_cell_types_and_proportions['inhibitory_types']
+        requested_cell_types_noPC1 = ['PC' if x=='PC1' else x for x in requested_cell_types_orig]
+        requested_cell_types = ['PC' if x=='PC2' else x for x in requested_cell_types_noPC1]
+        return requested_cell_types
 
     def spawn_subgroup_physiology(self):
         '''
@@ -326,6 +321,7 @@ class Groups(Config):
         Add subtypes one-by-one to physiol df
         Return physiol df
         '''
+        # TÄHÄN JÄIT. FRACT AREAS PC RYHMÄSSÄ TUOTTAA KEY ERRORIN
         # Unpack for current method
         physiology_df = self.physiology_config_df
         anatomy_config_df_new = self.anatomy_config_df_new
@@ -362,6 +358,9 @@ class Groups(Config):
             elif neuron_type in CompartmentalNeurons_df.columns:
                 keys = CompartmentalNeurons_df['Key']
                 values = CompartmentalNeurons_df[neuron_type]
+            elif neuron_type.startswith('PC'):
+                keys = CompartmentalNeurons_df['Key']
+                values = CompartmentalNeurons_df['PC']
             else:
                 raise NotImplementedError('neuron_type not recognized, requested types do not match neuron_group_ephys_templates? Aborting...')
 
@@ -393,13 +392,14 @@ class Groups(Config):
         anatomy_config_df = self.anatomy_config_df
         area_proportion = area_object.area_proportion
         requested_layers = area_object.requested_layers
-        PC_apical_dendrites = area_object.PC_apical_dendrites
+        PC_apical_dendrites = self.read_data_from_tables(PATH_TO_TABLES, NEURON_COMPARTMENT_FILENAME)
         inhibitory_proportions_df = self.inhibitory_proportions_df
         excitatory_proportions_df = self.excitatory_proportions_df
 
         monitors = self.monitors
         background_input = self.bg_inputs
         layer_mapping_df = self.layer_mapping_df 
+
 
         # Get and set column names for neuron groups
         existing_neuron_groups, cell_group_columns = self.get_data_from_anat_config_df(anatomy_config_df, 'G')
@@ -431,14 +431,12 @@ class Groups(Config):
         current_group_index = start_index
 
         for layer in requested_layers:
-            # current_layer_proportion_inhibitory = table2_df.loc[layer]['percent_inhibitory'] / 100
             current_layer_proportion_inhibitory = self.calc_proportion_inhibitory(layer, table2_df, layer_mapping_df)
-            # current_layer_N_neurons_area = table2_df.loc[layer]['n_neurons_10e6'] * 1e6
             current_layer_N_neurons_area = self.calc_N_neurons(layer, table2_df, layer_mapping_df)
             current_layer_N_excitatory_neurons = (1 - current_layer_proportion_inhibitory) * area_proportion * current_layer_N_neurons_area
             current_layer_N_inhibitory_neurons = current_layer_proportion_inhibitory * area_proportion * current_layer_N_neurons_area
-            # layer_idx = layer_mapping_df.loc[layer_mapping_df['allowed_requested_layers']==layer]['layer_idx'].values
-            layer_idx = layer_mapping_df.loc[layer_mapping_df['requested_layers'] == layer, 'layer_idx'].values[0]
+            layer_idx = self.layer_name_to_idx_mapping(layer)
+            # layer_idx = layer_mapping_df.loc[layer_mapping_df['requested_layers'] == layer, 'layer_idx'].values[0]
 
             # Add excitatory cell groups
             for current_group in excitatory_proportions_df.index.values:
@@ -446,16 +444,39 @@ class Groups(Config):
                 if excitatory_proportions_df.loc[current_group][layer]==0:
                     continue
                 # go through all columns which require individual values. 
-                # TODO Add from connection_csv_sublayer_to_table2_mapping.csv subproportion here to number of neurons
                 NG_df.loc[current_group_index,'number_of_neurons'] =  np.round(excitatory_proportions_df.loc[current_group][layer] * current_layer_N_excitatory_neurons)
-                NG_df.loc[current_group_index,'neuron_type'] = current_group
+                if current_group in _CELLTYPES:
+                    NG_df.loc[current_group_index,'neuron_type'] = current_group
+                else:
+                    for this_type in _CELLTYPES:
+                        if current_group.startswith(this_type):
+                            NG_df.loc[current_group_index,'neuron_type'] = this_type
                 # Use layers as neuron subtype prefixes
                 NG_df.loc[current_group_index,'neuron_subtype'] = layer + '_' + current_group
+
                 # For PC, map apical dendrite extent from table to layer index
-                if current_group == 'PC':
-                    # TODO: NOT IMPLEMENTED YET
-                    pass
-                    # NG_df.loc[current_group_index,layer_idx] = layer_mapping_df
+                if current_group.startswith('PC'):
+                    # pc_ad_map_df = self.area_object.PC_apical_dendrites.set_index(keys='layer')
+                    # # Map current layer to df index. Find correct row from pc_ad_map_df
+                    # assert layer in pc_ad_map_df.index.values, 'Requested layer not found in PC apical dendrite map. Create matching entry to PC_apical_dendrites.xlsx'
+                    # pc_ad_map_df_row_s = pc_ad_map_df.loc[layer]
+                    # # Map current group to PC1 or PC2
+                    # if current_group is 'PC':
+                    #     ad_group = 'PC1'
+                    # else: 
+                    #     assert current_group in pc_ad_map_df_row_s.index.values, 'PC group name not found in PC_apical_dendrites.xlsx for current layer'
+                    #     ad_group = current_group
+
+                    # # Map ad source and target to corresponding layer indices
+                    # ad_string = pc_ad_map_df_row_s.loc[ad_group]
+                    # ad_source_layer_name = ad_string[ad_string.find('[') + 1 : ad_string.find('->')]
+                    # ad_source_layer_idx = self.layer_name_to_idx_mapping(ad_source_layer_name)
+                    # ad_target_layer_name = ad_string[ad_string.find('->') + 2 : ad_string.find(']')]
+                    # ad_target_layer_idx = self.layer_name_to_idx_mapping(ad_target_layer_name)
+                    ad_source_layer_idx, ad_target_layer_idx = self.pc_apical_dendrite2layer_idx(layer, current_group)
+
+                    # Write layer_idx string
+                    NG_df.loc[current_group_index,'layer_idx'] =  '[' + str(ad_source_layer_idx) + '->' + str(ad_target_layer_idx) + ']'
                 else: 
                     NG_df.loc[current_group_index,'layer_idx'] =  layer_idx
 
@@ -495,6 +516,35 @@ class Groups(Config):
 
         return anatomy_config_df_new
 
+    def pc_apical_dendrite2layer_idx(self, layer, current_group):
+        '''
+        Map apical dendrite expression, eg [L5->L1] to source and target layer idx according to existing layers
+        '''
+        pc_ad_map_df = self.area_object.PC_apical_dendrites.set_index(keys='layer')
+        # Map current layer to df index. Find correct row from pc_ad_map_df
+        assert layer in pc_ad_map_df.index.values, 'Requested layer not found in PC apical dendrite map. Create matching entry to PC_apical_dendrites.xlsx'
+        pc_ad_map_df_row_s = pc_ad_map_df.loc[layer]
+        # Map current group to PC1 or PC2
+        if current_group is 'PC':
+            ad_group = 'PC1'
+        else: 
+            assert current_group in pc_ad_map_df_row_s.index.values, 'PC group name not found in PC_apical_dendrites.xlsx for current layer'
+            ad_group = current_group
+
+        # Map ad source and target to corresponding layer indices
+        ad_string = pc_ad_map_df_row_s.loc[ad_group]
+        ad_source_layer_name = ad_string[ad_string.find('[') + 1 : ad_string.find('->')]
+        ad_source_layer_idx = self.layer_name_to_idx_mapping(ad_source_layer_name)
+        ad_target_layer_name = ad_string[ad_string.find('->') + 2 : ad_string.find(']')]
+        ad_target_layer_idx = self.layer_name_to_idx_mapping(ad_target_layer_name)
+
+        return ad_source_layer_idx, ad_target_layer_idx
+
+    def layer_name_to_idx_mapping(self, layer_in):
+        assert layer_in in self.layer_mapping_df['requested_layers'].values, 'Current layer not among requested layers'
+        layer_idx = self.layer_mapping_df.loc[self.layer_mapping_df['requested_layers'] == layer_in, 'layer_idx'].values[0]
+        return layer_idx
+
     def calc_N_neurons(self, current_layer, table2_df, layer_mapping_df):
         # When more or less than than one layer maps to requested layer, one cannot directly query table 2
         # Instead you need to sum according to sub_proportion
@@ -522,7 +572,6 @@ class Groups(Config):
         # Instead you need to average according to sub_proportion
         # from layer_mapping_df, choose current_layer rows in requested_layer_column
         # TODO Less than one layer not implemented yet
-        # TODO remove quickfix where 4CM is accounted by 4CB in down_map3 of table layer_name_mapping_V1
 
         table2to_sub_proportions_df = layer_mapping_df.loc[layer_mapping_df['requested_layers'] == 
                                         current_layer, ['table2_df', 'sub_proportion']]
@@ -663,33 +712,36 @@ class Connections(Config):
     Generate synapses object, which includes the new anatomy df with connections
     '''
 
-    def __init__(self, area_object, NG_new, use_all_csv_data):
-                
+    def __init__(self, area_object, group_object, use_all_csv_data):
+        
         # Read data from files.
         # Read ni csv into dataframe
         exc_df = self.read_data_from_tables(PATH_TO_NI_CSV, LOCAL_EXCITATORY_CONNECTION_FILENAME)
         inh_df = self.read_data_from_tables(PATH_TO_NI_CSV, LOCAL_INHIBITORY_CONNECTION_FILENAME)
+        self.post_syn_comp_df = self.read_data_from_tables(PATH_TO_TABLES, POST_SYN_COMPARTMENTS)
+        self.post_syn_type_df = self.read_data_from_tables(PATH_TO_TABLES, POST_SYN_TARGET_CELLTYPES)
+        
         area_name = area_object.area_name
         requested_layers = area_object.requested_layers
-        # layer_mapping_df = NG_new.layer_mapping_df
+        # layer_mapping_df = group_object.layer_mapping_df
         # layer_name_mapping_df_orig = area_object.layer_name_mapping_df_orig
         layer_name_mapping_df_groups = area_object.layer_name_mapping_df_groups
         layer_name_mapping_df_full = area_object.layer_name_mapping_df_full
 
 
-        self.anatomy_config_df_new_groups = NG_new.anatomy_config_df_new
+        self.anatomy_config_df_new_groups = group_object.anatomy_config_df_new
         
         # Map exc_df and inh_df to valid format inhibitory and excitatory connections in each layer
         self.excitatory_connections_df = self.get_local_connection_df(exc_df, area_name, 
-                                            layer_name_mapping_df_full, layer_name_mapping_df_groups, use_all_csv_data)
+                                            layer_name_mapping_df_full, layer_name_mapping_df_groups)
 
         self.inhibitory_connections_df = self.get_local_connection_df(inh_df, area_name, 
-                                            layer_name_mapping_df_full, layer_name_mapping_df_groups, use_all_csv_data)
+                                            layer_name_mapping_df_full, layer_name_mapping_df_groups)
 
         # Generate connections
-        self.anatomy_config_df_new_groups_new_synapses = self.generate_synapses(area_object, NG_new)
+        self.anatomy_config_df_new_groups_new_synapses = self.generate_synapses(area_object, group_object)
 
-    def generate_synapses(self, area_object, NG_new):
+    def generate_synapses(self, area_object, group_object):
         '''
         generate_synapses function
         -for each origin and target group, set receptor,pre_syn_idx,post_syn_idx by layer and compartment,syn_type,p,n,
@@ -699,51 +751,39 @@ class Connections(Config):
 
         # Unpack for this method
         layer_mapping_df = area_object.layer_name_mapping_df_groups
-        inhibitory_proportions_df = NG_new.inhibitory_proportions_df
-        excitatory_proportions_df = NG_new.excitatory_proportions_df
+        layerIdx2layerNames_dict = area_object.layerIdx2layerNames_dict
+        layerNames2layerIdx_dict = area_object.layerNames2layerIdx_dict
+        requested_cell_types = group_object.requested_cell_types
+        excitatory_proportions_df = group_object.excitatory_proportions_df
+        inhibitory_proportions_df = group_object.inhibitory_proportions_df
 
         replace_existing_cell_groups = self.replace_existing_cell_groups
         excitatory_connections_df = self.excitatory_connections_df 
         inhibitory_connections_df = self.inhibitory_connections_df 
         anatomy_config_df_new_groups = self.anatomy_config_df_new_groups
-        # layer_mapping_df = self.layer_mapping_df
 
         # Get and set column names for connections
         existing_connection, connection_columns = self.get_data_from_anat_config_df(self.anatomy_config_df, 'S')
 
         # Get starting index for connections and row indices for anat df
         if self.replace_existing_cell_groups:
-            # start_connection_index = 1 # Reserve 0 for input group
             start_index = anatomy_config_df_new_groups.groupby([0]).get_group('S').index[0]
         else:
-            # start_connection_index = int(existing_connection['idx'].values[-1]) + 1
             start_index = anatomy_config_df_new_groups.groupby([0]).get_group('S').index[-1] + 1
 
-        # Count number of new connections, ie number of new rows.
-        index_excitatory_s = excitatory_proportions_df.fillna(0).astype(bool).sum()
-        index_inhibitory_s = inhibitory_proportions_df.fillna(0).astype(bool).sum()
-        
-        layerIdx2layerNames_dict = dict(set(zip(layer_mapping_df['layer_idx'], layer_mapping_df['requested_layers'])))
+        # N_rows = self._get_n_connection_rows(group_object, excitatory_connections_df, inhibitory_connections_df, excitatory_proportions_df, inhibitory_proportions_df, layerNames2layerIdx_dict)
+        N_rows = N_MAX_NEW_CONNECTIONS
 
-        # N connections = Sum of (N source layer neuron groups * N target layer neuron groups) over all neuron groups
-        # Number of excitatory layerwise connections FromLayer (NELCF)
-        NELCF_s = excitatory_connections_df['FromLayer'].replace(layerIdx2layerNames_dict).replace(index_excitatory_s.to_dict())
-        NELCT_s = excitatory_connections_df['ToLayer'].replace(layerIdx2layerNames_dict).replace(index_excitatory_s.to_dict())
-        NILCF_s = inhibitory_connections_df['FromLayer'].replace(layerIdx2layerNames_dict).replace(index_inhibitory_s.to_dict())
-        NILCT_s = inhibitory_connections_df['ToLayer'].replace(layerIdx2layerNames_dict).replace(index_inhibitory_s.to_dict())
-        N_rows_EE =  np.sum(NELCF_s * NELCT_s) 
-        N_rows_EI =  np.sum(NELCF_s * NILCT_s) 
-        N_rows_IE =  np.sum(NILCF_s * NELCT_s)         
-        N_rows_II =  np.sum(NILCF_s * NILCT_s) 
-        N_rows = N_rows_EE + N_rows_EI + N_rows_IE + N_rows_II
+        self.post_syn_comp_df # rules for connecting synapses to postsyn PC compartments
+        
         # Generate df for holding the connections. Add indices here to preallocate memory
         indices = start_index + np.arange(N_rows)      
         syn_df = pd.DataFrame(columns=connection_columns, index=indices)
 
         # Now we go for the cell groups. First let's set the identical values
         syn_df.row_type = 'S'
-        syn_df.syn_type = 'Depressing'
-        syn_df.n = 1
+        syn_df.syn_type = SYNAPSE_TYPE
+        syn_df.n = N_SYNAPSES_PER_CONNECTION
         syn_df.monitors = syn_df.custom_weight = '--'
         syn_df.load_connection = syn_df.save_connection = 0
 
@@ -752,29 +792,33 @@ class Connections(Config):
 
         # Add one layer at a time starting from L1
         current_connection_index = start_index
-        layerNames2layerIdx_dict = dict(map(reversed, layerIdx2layerNames_dict.items()))
         
         # Set 'receptor', 'pre_syn_idx', 'post_syn_idx', 'p'
         # Excitatory connections
         syn_df, current_connection_index = self._set_connection_parameters(syn_df, 
             existing_neuron_groups_df, excitatory_connections_df, excitatory_proportions_df,  
             inhibitory_proportions_df, current_connection_index, layerIdx2layerNames_dict, 
-            receptor_type='ge')
+            layerNames2layerIdx_dict, requested_cell_types, receptor_type='ge')
         
         # Inhibitory connections
         syn_df, current_connection_index = self._set_connection_parameters(syn_df, 
             existing_neuron_groups_df, inhibitory_connections_df, excitatory_proportions_df,  
             inhibitory_proportions_df, current_connection_index, layerIdx2layerNames_dict, 
-            receptor_type='gi')
+            layerNames2layerIdx_dict, requested_cell_types, receptor_type='gi')
 
-        # Sort to 1-source neuron group, 2-E,I, 3-target neuron group
+        # Cut extra rows
+        assert current_connection_index < N_MAX_NEW_CONNECTIONS + start_index,\
+            f'''Increase constant N_MAX_NEW_CONNECTIONS, now {N_MAX_NEW_CONNECTIONS} but you have {current_connection_index-start_index} connections'''
+        syn_df = syn_df.loc[:current_connection_index - 1,:]
+
+        # Sort to 1-source neuron group, 2-E,I
         # Because neuron groups are numbered from layer 1 downwards, E first, we get
         # sorted as source layer E -> target neuron group  E, I -> source layer I -> target neuron group E, I
-        syn_df = syn_df.sort_values(by=['pre_syn_idx', 'receptor', 'post_syn_idx'])
+        syn_df = syn_df.sort_values(by=['pre_syn_idx', 'receptor'])
 
         # Change column names
         syn_df.columns = anatomy_config_df_new_groups.columns
-
+        
         # Get anat config df first new connection index
         anatomy_config_df_beginning = anatomy_config_df_new_groups.iloc[:start_index,:] 
         
@@ -785,13 +829,21 @@ class Connections(Config):
 
     def _set_connection_parameters(self, syn_df, existing_neuron_groups_df, connections_df, 
             excitatory_proportions_df, inhibitory_proportions_df, current_connection_index, 
-            layerIdx2layerNames_dict, receptor_type=None):
-            
+            layerIdx2layerNames_dict, layerNames2layerIdx_dict, requested_cell_types, 
+            receptor_type=None):
+        
+        post_syn_comp_df_requested_cell_types =  self.post_syn_comp_df.loc[ 
+            self.post_syn_comp_df['Presynaptic Cell Types'].isin(requested_cell_types)]
+        post_syn_type_df_requested_cell_types =  self.post_syn_type_df.loc[ 
+            self.post_syn_type_df['Presynaptic Cell Types'].isin(requested_cell_types)]
+
         receptor = receptor_type
+
         for conn_idx in connections_df.index.values:
 
             pre_layer = layerIdx2layerNames_dict[connections_df.loc[conn_idx,'FromLayer']]
-            post_layer = layerIdx2layerNames_dict[connections_df.loc[conn_idx,'ToLayer']]
+            post_layer_idx = connections_df.loc[conn_idx,'ToLayer']
+            post_layer = layerIdx2layerNames_dict[post_layer_idx]
             probability = connections_df.loc[conn_idx,'p']
 
             #Create logic for switching between e and i proportions
@@ -805,26 +857,150 @@ class Connections(Config):
                 # Get pre group idx
                 pre_neuron_subtype = pre_layer + '_' + current_pre_type
 
-                for current_post_type in  \
-                    excitatory_proportions_df.index[excitatory_proportions_df[post_layer].fillna(0).astype(bool).values].values.tolist() + \
-                    inhibitory_proportions_df.index[inhibitory_proportions_df[post_layer].fillna(0).astype(bool).values].values.tolist():                
-                    # Get post neuron subgroup name
-                    post_neuron_subtype = post_layer + '_' + current_post_type
+                '''
+                In addition to neuron groups in the current post_layer, PC groups below this layer 
+                may have their apical dendrites here. Postsynaptic connections may go to PC soma, apical or  
+                basal dendrite in this layer or to apical dendrites crossing this layer. Thus we need to
+                add all PC groups with crossing apical dendrites to post neuron groups
+                Pseudocode:
+                Expand existing_neuron_groups_df PC layer idx from  [7->1] to array of 1,2,3,4,5,6,7 for search of corresponding post syn layer
+                Associate matching compartments with indices to PC apical dendrite
+                Get matching compartments of all PC groups at the current post_layer.
 
+                Coding of post_syn_idx for PCs:
+                1[C]0ba : 1 is NG idx, [C] is compartmental flag, 0 is layer idx starting from NG home layer upwards, 
+                home layer = 0. a is apical d, b is basal d, s is soma.
 
+                So you need NG idx for all postsyn groups and postsyn compartment idx for PC neurons. 
+                Then you need to map exc conn to ba and inh conn to s at soma layer
+                '''
+
+                # Get neuron_subtype list of PC groups whose apical dendrites extend to this post_layer_idx
+                pc_groups_list, pc_groups_comp_list = self._get_pc_groups(existing_neuron_groups_df[['neuron_type', 'neuron_subtype', 'layer_idx']], post_layer_idx)
+                exc_groups_list = excitatory_proportions_df.index[excitatory_proportions_df[post_layer].fillna(0).astype(bool).values].values.tolist()
+                point_exc_groups_list = [g for g in exc_groups_list if not g.startswith('PC')]
+                inh_groups_list = inhibitory_proportions_df.index[inhibitory_proportions_df[post_layer].fillna(0).astype(bool).values].values.tolist()
+                all_post_types_in_current_post_layer = point_exc_groups_list + pc_groups_list + inh_groups_list
+
+                for current_post_type in all_post_types_in_current_post_layer:
+
+                    # init weight_pretype2posttype, weight_pretype2postcomp
+                    weight_pretype2posttype = 1
+                    weight_pretype2postcomp = 1
+
+                    pre_type = current_pre_type
+                    post_type = current_post_type
+
+                    if pre_type.startswith('PC'): 
+                        pre_type = 'PC' # Truncate for main type
+                    if post_type.startswith('PC') or \
+                        post_type.startswith('L') and '_PC' in post_type: 
+                        post_type = 'PC' # Truncate for main type
+
+                    # Check if pre type contacts post type, if yes get weight multiplier, otherwise continue
+                    allowed_types_s = post_syn_type_df_requested_cell_types.loc[
+                        post_syn_type_df_requested_cell_types['Presynaptic Cell Types'] == 
+                        pre_type,'Postsynaptic Cell Types']
+                        
+                    allowed_types_list = self.pd_string_value2list_of_strings(allowed_types_s)
+
+                    if not post_type in allowed_types_list:
+                        continue 
+                    else:
+                        #Find which index of list contains the post type
+                        matching_idx = allowed_types_list.index(post_type)
+                        # Get multiplier
+                    allowed_weights = post_syn_type_df_requested_cell_types.loc[
+                        post_syn_type_df_requested_cell_types['Presynaptic Cell Types'] == 
+                        pre_type,'Postsynaptic Cell Weights'] 
+                    allowed_weights_list = self.pd_string_value2list_of_strings(allowed_weights) 
+                    weight_pretype2posttype = np.float(allowed_weights_list[matching_idx])
+
+                    if post_type == 'PC':
+                        postsyn_ad = ''
+                        comp_name = ''
+                        # weight_pretype2postcomp = 0
+                        ng_idx = str(existing_neuron_groups_df.loc[existing_neuron_groups_df['neuron_subtype'] == current_post_type, 'idx'].values[0])
+                        comp_idx = self._get_comp_idx(current_post_type, post_layer, layerNames2layerIdx_dict)
+                        # Get post comp connection weight for current pre type, continue if zero
+                        current_pre_type_post_comp_distribution = post_syn_comp_df_requested_cell_types.loc[
+                            post_syn_comp_df_requested_cell_types['Presynaptic Cell Types']==pre_type, 'Distribution']
+                        current_pre_type_post_comp_distribution_list = self.pd_string_value2list_of_strings(current_pre_type_post_comp_distribution)
+                        # Get postsyn ad (apicalProx, apicalDist)
+                        postsyn_ad = pc_groups_comp_list[pc_groups_list.index(current_post_type)]
+
+                        if postsyn_ad == 'soma':
+                            # Get soma indexes
+                            values = np.array([float(i) for i in current_pre_type_post_comp_distribution_list[:3]])
+                            comp_index = values > 0
+                            letters = np.array(['b', 's', 'a'])
+                            comp_name = ''.join(letters[comp_index])
+                            weight_pretype2postcomp = values[comp_index]
+                        elif postsyn_ad == 'apicalProx':
+                            comp_index = 3
+                            weight_pretype2postcomp = np.float(current_pre_type_post_comp_distribution_list[comp_index])
+                        elif postsyn_ad == 'apicalDist':
+                            comp_index = 4
+                            weight_pretype2postcomp = np.float(current_pre_type_post_comp_distribution_list[comp_index])
+                        else:
+                            raise NotImplementedError('postsyn_ad not caught at _set_connection_parameters')
+                        
+                        # If current pre type does not have contact with current PC compartment
+                        if not np.any(weight_pretype2postcomp):
+                            continue
+
+                        post_syn_idx_pc_string = ng_idx + '[C]' + comp_idx + comp_name
+                    else:
+                        post_syn_idx_pc_string = existing_neuron_groups_df.loc[existing_neuron_groups_df['neuron_subtype'] == post_layer + '_' + current_post_type, 'idx'].values[0]
+ 
                     syn_df.loc[current_connection_index,'receptor'] = receptor
                     syn_df.loc[current_connection_index,'pre_syn_idx'] = \
                         existing_neuron_groups_df.loc[existing_neuron_groups_df['neuron_subtype'] == pre_neuron_subtype, 'idx'].values[0]
-                    syn_df.loc[current_connection_index,'post_syn_idx'] = \
-                        existing_neuron_groups_df.loc[existing_neuron_groups_df['neuron_subtype'] == post_neuron_subtype, 'idx'].values[0]
+                    
+                    syn_df.loc[current_connection_index,'post_syn_idx'] = post_syn_idx_pc_string
+                    probability_value = probability * weight_pretype2posttype * weight_pretype2postcomp
 
-                    syn_df.loc[current_connection_index,'p'] = probability
+                    if probability_value.size > 1:
+                        n_times = probability_value.size
+                        probability_value = np.array2string(probability_value, separator='+')[1:-1]
+                        syn_df.loc[current_connection_index,'n'] = '+'.join(str(N_SYNAPSES_PER_CONNECTION) * n_times)
+
+                    syn_df.loc[current_connection_index,'p'] = probability_value
                     current_connection_index += 1
-
+                    
         return syn_df, current_connection_index
 
+    def _get_comp_idx(self, current_post_type, post_syn_layer, layerNames2layerIdx_dict):
+        # To resolve comp_idx, we need to know where is postsyn PC soma compared to current post syn layer
+        postsyn_pc_soma_layer_name = current_post_type[:current_post_type.find('_')]
+        postsyn_pc_soma_layer_idx = layerNames2layerIdx_dict[postsyn_pc_soma_layer_name]
+        current_post_syn_layer_idx = layerNames2layerIdx_dict[post_syn_layer]
+        comp_idx = str(postsyn_pc_soma_layer_idx - current_post_syn_layer_idx)
+        return comp_idx
+
+    def _get_pc_groups(self, groups_df, post_layer_idx):
+        # Get neuron_subtype list of PC groups whose apical dendrites extend to this post_layer_idx
+        pc_groups_df = groups_df[groups_df['neuron_type'].str.startswith('PC')]
+        def applyme(my_string):
+            # From example '[7->1]' to array([6,5,4,3,2,1])
+            return eval('np.arange(int(my_string[my_string.find("[")+1]), int(my_string[my_string.find("->")+2]) - 1, -1)')
+        pc_groups_expand_df = pc_groups_df.copy()
+        pc_groups_expand_df['layer_idx'] = pc_groups_df['layer_idx'].apply(applyme)
+        pc_groups_list = []
+        pc_groups_comp_list = []
+        for foo, row in pc_groups_expand_df.iterrows():
+            if post_layer_idx in row['layer_idx']:
+                pc_groups_list.append(row['neuron_subtype'])
+            if post_layer_idx == row['layer_idx'][-1]:
+                pc_groups_comp_list.append('apicalDist')
+            elif post_layer_idx in row['layer_idx'][1:-1]:
+                pc_groups_comp_list.append('apicalProx')
+            elif post_layer_idx == row['layer_idx'][0]:
+                pc_groups_comp_list.append('soma')
+        return pc_groups_list, pc_groups_comp_list
+
     def get_local_connection_df(self, ni_df, area_name, layer_name_mapping_df_full, 
-                                layer_name_mapping_df_groups, use_all_csv_data):
+                                layer_name_mapping_df_groups):
         '''
         Turn neuroinformatics connection df to useful connection_df
 
@@ -840,6 +1016,8 @@ class Connections(Config):
         Separate proportions for the pre- and postsynaptic side, multiply for final connections
 
         '''
+
+        use_all_csv_data = self.use_all_csv_data
 
         # Select area
         connection_df_ni_names = ni_df.groupby(['FromArea']).get_group(area_name)
@@ -964,7 +1142,6 @@ class Connections(Config):
         connection_df_ni_names_unique['p'] = (connection_df_ni_names_unique['p_total'] * 2) / \
             (connection_df_ni_names_unique['FL_proportions'] + connection_df_ni_names_unique['TL_proportions'])
         
-
         return connection_df_ni_names_unique
 
 
@@ -976,7 +1153,7 @@ def show_cortex():
     '''    
     pass
 
-
+# ***************************************************************************
 if __name__ == "__main__":
     '''
     Start of user input
@@ -1011,7 +1188,6 @@ if __name__ == "__main__":
     requested_layers=['L1', 'L23', 'L4A','L4B', 'L4C','L5','L6'] # You should be able start from L4CA or B alone for testing
     # requested_layers=['L23', 'L4CA', 'L5','L6'] # You should be able start from L4CA or B alone for testing
     # requested_layers=['L23', 'L4CA', 'L5','L6'] # You should be able start from L4CA or B alone for testing
-    # requested_layers=['SG', 'L4', 'IG'] # You should be able start from L4CA or B alone for testing
  
     # Here are some examples
     inhibitory_types = ['MC', 'BC', 'VIP']
@@ -1028,7 +1204,7 @@ if __name__ == "__main__":
     'L4A': [.33, .33, .33], 
     'L4B': [.33, .33, .33], 
     'L4C': [1, 0, 0],
-    'L5': [0, .5, .5], 
+    'L5': [.33, .33, .33], 
     'L6': [0, .5, .5]}
 
     # Excitatory proportions are given by hand here. 
@@ -1036,17 +1212,16 @@ if __name__ == "__main__":
     # The layers must match the requested layers
     # The SS type in L1 is just a pointlike excitatory neuron
     # excitatory_types = ['SS', 'PC1', 'PC2']
-    excitatory_types = ['SS'] # IT is one of th Allen excitatory types. SS = spiny stellate and this should exist in all physiological files
-    excitatory_proportions = {} # Leaving this empty will produce 1/N types proportions for each layer if cell_type_data_source = ''
-    # excitatory_proportions = {  
-    # 'L1': [1, 0, 0], 
-    # 'L23': [0, .5, .5], 
-    # 'L4A': [.33, .33, .33], 
-    # 'L4B': [.33, .33, .33], 
-    # 'L4CA': [1, 0, 0],
-    # 'L4CB': [1, 0, 0],
-    # 'L5': [0, .5, .5], 
-    # 'L6': [0, .5, .5]}
+    excitatory_types = ['SS','PC1'] # IT is one of th Allen excitatory types. SS = spiny stellate and this should exist in all physiological files
+    # excitatory_proportions = {} # Leaving this empty will produce 1/N types proportions for each layer if cell_type_data_source = ''
+    excitatory_proportions = {  
+    'L1': [1, 0], 
+    'L23': [0, 1], 
+    'L4A': [.5, .5], 
+    'L4B': [.5, .5], 
+    'L4C': [1, 0],
+    'L5': [0, 1], 
+    'L6': [.1, .9]}
 
     # inhibitory_types = ['example1','example2','example3'] # Name example is used for construction. For simulation, these need to match the physiology cell type names
     # inhibitory_proportions={}
@@ -1082,13 +1257,10 @@ if __name__ == "__main__":
     # Connections. You can use only a subset of layers in ni csv data matching your requested layers or alternatively
     # you can use all csv data, including the sublayers and CO compartments.
     use_all_csv_data = True
-
-    # TODO: Assume layer autoconnections flag
+    
     '''
     End of user input
     '''
-    # TODO: ASSERT excitatory_proportions IS EITHER EMPTY, OR ROWS MATCHES N NEURON TYPES AND COLUMN NAMES MATCHES THE REQUESTED LAYERS
-    # TODO: Bring fixed filenames to user input above or here.
 
     if cell_type_data_source == 'HBP':
         cell_type_data_folder_name='hbp_data'; cell_type_data_file_name='layer_download.json'
@@ -1115,21 +1287,22 @@ if __name__ == "__main__":
     Config.replace_existing_cell_groups = replace_existing_cell_groups  
     Config.table1_df = Config.get_neuroinformatics_data(TABLE1_DATA_FILENAME, set_index='stat')
     Config.table2_df = Config.get_neuroinformatics_data(TABLE2_DATA_FILENAME, set_index='layer')
+    Config.use_all_csv_data = use_all_csv_data
 
     # CxC = Config()
     V1 = Area(area_name=area_name, requestedVFradius=requestedVFradius, center_ecc=center_ecc, requested_layers=requested_layers)
 
     # Add anatomy and physiology config files to start with
-    NG_new = Groups(V1, requested_cell_types_and_proportions, cell_type_data_source, cell_type_data_folder_name, 
+    group_object = Groups(V1, requested_cell_types_and_proportions, cell_type_data_source, cell_type_data_folder_name, 
                 cell_type_data_file_name, request_monitors,requested_background_input)
 
-    # NG_new.anatomy_config_df_new.to_csv(os.path.join(PATH_TO_CONFIG_FILES,anatomy_config_file_name[:-4] + suffix_for_new_files + '.csv'), header=False, index=False)
+    # group_object.anatomy_config_df_new.to_csv(os.path.join(PATH_TO_CONFIG_FILES,anatomy_config_file_name[:-4] + suffix_for_new_files + '.csv'), header=False, index=False)
     # # For debugging we write this to excel, too
-    # NG_new.anatomy_config_df_new.to_excel(os.path.join(PATH_TO_CONFIG_FILES,anatomy_config_file_name[:-4] + suffix_for_new_files + '.xlsx'), header=False, index=False)
+    # group_object.anatomy_config_df_new.to_excel(os.path.join(PATH_TO_CONFIG_FILES,anatomy_config_file_name[:-4] + suffix_for_new_files + '.xlsx'), header=False, index=False)
     # # For cxsystem we write this to json, too
-    # NG_new.anatomy_config_df_new.to_json(os.path.join(PATH_TO_CONFIG_FILES,anatomy_config_file_name[:-4] + suffix_for_new_files + '.json'))
+    # group_object.anatomy_config_df_new.to_json(os.path.join(PATH_TO_CONFIG_FILES,anatomy_config_file_name[:-4] + suffix_for_new_files + '.json'))
 
-    Conn_new = Connections(V1, NG_new, use_all_csv_data)
+    Conn_new = Connections(V1, group_object, use_all_csv_data)
 
     # Write anatomy out
     Config.write_config_files(Config.anatomy_config_df, anatomy_config_file_name, xlsx=True) # Original as excel file
@@ -1137,4 +1310,4 @@ if __name__ == "__main__":
     
     # Write physiology out
     Config.write_config_files(Config.physiology_config_df, physiology_config_file_name, xlsx=True) # Original as excel file
-    Config.write_config_files(NG_new.physiology_df_with_subgroups, physiology_config_file_name[:-4] + '_cxc', csv=True, xlsx=True)
+    Config.write_config_files(group_object.physiology_df_with_subgroups, physiology_config_file_name[:-4] + '_cxc', csv=True, xlsx=True)
