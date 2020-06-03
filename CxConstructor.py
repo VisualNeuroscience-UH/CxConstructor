@@ -347,7 +347,7 @@ class Groups(Config):
 
         unique_subtypes = existing_neuron_groups['neuron_subtype'].unique()
         collect_subtype_dataframes_list = []
-
+        # pdb.set_trace()
         for neuron_subtype in unique_subtypes:
             # Get matching type
             neuron_type = existing_neuron_groups.groupby(['neuron_subtype']).get_group(neuron_subtype)['neuron_type'].values[0]
@@ -357,10 +357,12 @@ class Groups(Config):
                 values = PointNeurons_df[neuron_type]
             elif neuron_type in CompartmentalNeurons_df.columns:
                 keys = CompartmentalNeurons_df['Key']
-                values = CompartmentalNeurons_df[neuron_type]
+                # values = CompartmentalNeurons_df[neuron_type]
+                values = self._get_compartmental_values(keys, CompartmentalNeurons_df[neuron_type], neuron_subtype)
             elif neuron_type.startswith('PC'):
                 keys = CompartmentalNeurons_df['Key']
-                values = CompartmentalNeurons_df['PC']
+                # values = CompartmentalNeurons_df['PC']
+                values = self._get_compartmental_values(keys, CompartmentalNeurons_df['PC'], neuron_subtype)
             else:
                 raise NotImplementedError('neuron_type not recognized, requested types do not match neuron_group_ephys_templates? Aborting...')
 
@@ -376,6 +378,60 @@ class Groups(Config):
         physiology_df_with_subgroups = pd.concat([physiology_df_stub, all_subtype_ephys_df],ignore_index=True)
 
         return physiology_df_with_subgroups
+
+    def _get_compartmental_values(self, keys, values, neuron_subtype):
+        # Set Area_total, fract_areas and Ra to match PC subtype
+        neuron_subtype_layer = neuron_subtype[:neuron_subtype.find('_')]
+        neuron_type = neuron_subtype[neuron_subtype.find('_') + 1:]
+        # pc_ad_map_df = self.area_object.PC_apical_dendrites.set_index(keys='layer')
+
+        ad_source_layer_idx, ad_target_layer_idx = self.pc_apical_dendrite2layer_idx(neuron_subtype_layer, neuron_type)
+
+        # Example of PC with ad comp 0, 1 and 2
+        # fract_areas = {2: array([0.58, 0.052, 0.20, 0.15, 0.020])}
+        # Ra = [100,100,150,150,150] * Mohm # There is probably one comp too much here
+        # Area_tot_pyram = 10913.2817103 * um**2 rounded to 11000
+
+        # Get constants
+        R_basal2soma = 100
+        R_apical = 150
+        Area_tot_pyram_3ad = 11000 # for 3 ad compartment of size fa_bsa[-1]
+        fa_bsa = np.array([0.55, 0.05, 0.2]) # fract_areas_basal_soma_apical
+
+        n_nonsoma_ad_comps = ad_source_layer_idx - ad_target_layer_idx 
+        N_comps = 3 + n_nonsoma_ad_comps # basal, soma, apical0 + apical dendrite compartments outside soma layer
+        fa_ad = np.repeat(fa_bsa[-1], n_nonsoma_ad_comps)
+        fa_bsa_full = np.append(fa_bsa,fa_ad)
+        fa_bsa_full = fa_bsa_full / np.sum(fa_bsa_full) # normalize sum to 1, keeping ratio of one_ad_comp / (soma+basal) constant
+        n_total_apical_comps = 1 + n_nonsoma_ad_comps
+        array_string = ", ".join([str(round(i,2)) for i in fa_bsa_full])
+        fract_areas =   '{' + \
+                        f'{n_nonsoma_ad_comps}: array([{array_string}])' + \
+                        '}'
+        Ra_ad = np.repeat(R_apical, n_total_apical_comps)
+        Ra_string = ", ".join([str(round(i,0)) for i in Ra_ad])
+        Ra = f'[{R_basal2soma}, {Ra_string} ] * Mohm'
+
+        # Area_total_pyram
+        at_b = fa_bsa[0] * Area_tot_pyram_3ad
+        at_s = fa_bsa[1] * Area_tot_pyram_3ad
+        at_ad = fa_bsa[-1] * Area_tot_pyram_3ad
+        at_full = at_b + at_s + (at_ad * n_total_apical_comps)
+        Area_tot_pyram = f'{at_full} * um**2'
+        
+        # Set rea_tot_pyram, fract_areas and Ra
+        values_new = values
+
+        fract_areas_index = keys=='fract_areas'
+        Ra_index = keys=='Ra'
+        Area_tot_pyram_index = keys=='Area_tot_pyram'
+
+        values_new = values_new.mask(fract_areas_index,other = fract_areas)
+        values_new = values_new.mask(Ra_index,other = Ra)
+        values_new = values_new.mask(Area_tot_pyram_index,other = Area_tot_pyram)
+
+        return values_new
+
 
     def generate_cell_groups(self, area_object, requested_cell_types_and_proportions):
         '''
@@ -436,7 +492,6 @@ class Groups(Config):
             current_layer_N_excitatory_neurons = (1 - current_layer_proportion_inhibitory) * area_proportion * current_layer_N_neurons_area
             current_layer_N_inhibitory_neurons = current_layer_proportion_inhibitory * area_proportion * current_layer_N_neurons_area
             layer_idx = self.layer_name_to_idx_mapping(layer)
-            # layer_idx = layer_mapping_df.loc[layer_mapping_df['requested_layers'] == layer, 'layer_idx'].values[0]
 
             # Add excitatory cell groups
             for current_group in excitatory_proportions_df.index.values:
@@ -456,23 +511,7 @@ class Groups(Config):
 
                 # For PC, map apical dendrite extent from table to layer index
                 if current_group.startswith('PC'):
-                    # pc_ad_map_df = self.area_object.PC_apical_dendrites.set_index(keys='layer')
-                    # # Map current layer to df index. Find correct row from pc_ad_map_df
-                    # assert layer in pc_ad_map_df.index.values, 'Requested layer not found in PC apical dendrite map. Create matching entry to PC_apical_dendrites.xlsx'
-                    # pc_ad_map_df_row_s = pc_ad_map_df.loc[layer]
-                    # # Map current group to PC1 or PC2
-                    # if current_group is 'PC':
-                    #     ad_group = 'PC1'
-                    # else: 
-                    #     assert current_group in pc_ad_map_df_row_s.index.values, 'PC group name not found in PC_apical_dendrites.xlsx for current layer'
-                    #     ad_group = current_group
 
-                    # # Map ad source and target to corresponding layer indices
-                    # ad_string = pc_ad_map_df_row_s.loc[ad_group]
-                    # ad_source_layer_name = ad_string[ad_string.find('[') + 1 : ad_string.find('->')]
-                    # ad_source_layer_idx = self.layer_name_to_idx_mapping(ad_source_layer_name)
-                    # ad_target_layer_name = ad_string[ad_string.find('->') + 2 : ad_string.find(']')]
-                    # ad_target_layer_idx = self.layer_name_to_idx_mapping(ad_target_layer_name)
                     ad_source_layer_idx, ad_target_layer_idx = self.pc_apical_dendrite2layer_idx(layer, current_group)
 
                     # Write layer_idx string
@@ -1190,7 +1229,7 @@ if __name__ == "__main__":
     # requested_layers=['L23', 'L4CA', 'L5','L6'] # You should be able start from L4CA or B alone for testing
  
     # Here are some examples
-    inhibitory_types = ['MC', 'BC', 'VIP']
+    inhibitory_types = ['MC', 'BC']
     # inhibitory_types = ['BC']
     # inhibitory_proportions={} # Leaving this empty will produce 1/N types proportions for each layer if cell_type_data_source = ''
     # inhibitory_proportions = {  
@@ -1198,14 +1237,22 @@ if __name__ == "__main__":
     # 'L4CA': [1, 0],
     # 'L5': [.5, .5], 
     # 'L6': [.5, .5]}
+    # inhibitory_proportions = {  
+    # 'L1': [1, 0, 0], 
+    # 'L23': [0, .5, .5], 
+    # 'L4A': [.33, .33, .33], 
+    # 'L4B': [.33, .33, .33], 
+    # 'L4C': [1, 0, 0],
+    # 'L5': [.33, .33, .33], 
+    # 'L6': [0, .5, .5]}
     inhibitory_proportions = {  
-    'L1': [1, 0, 0], 
-    'L23': [0, .5, .5], 
-    'L4A': [.33, .33, .33], 
-    'L4B': [.33, .33, .33], 
-    'L4C': [1, 0, 0],
-    'L5': [.33, .33, .33], 
-    'L6': [0, .5, .5]}
+    'L1': [1, 0], 
+    'L23': [.5, .5], 
+    'L4A': [.5, .5], 
+    'L4B': [.5, .5], 
+    'L4C': [1, 0],
+    'L5': [.5, .5], 
+    'L6': [.5, .5]}
 
     # Excitatory proportions are given by hand here. 
     # The list length for each layer must match the N types and should sum to approximately 1.
