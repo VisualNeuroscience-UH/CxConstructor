@@ -321,7 +321,6 @@ class Groups(Config):
         Add subtypes one-by-one to physiol df
         Return physiol df
         '''
-        # TÄHÄN JÄIT. FRACT AREAS PC RYHMÄSSÄ TUOTTAA KEY ERRORIN
         # Unpack for current method
         physiology_df = self.physiology_config_df
         anatomy_config_df_new = self.anatomy_config_df_new
@@ -342,12 +341,14 @@ class Groups(Config):
             assert isinstance(input_group, str), f'Not typical input group expression in physiology config at line {cutoff_index + 1}, aborting...'
             print(f"Warning: Adding assumed input group {input_group}")
             physiology_df_stub = physiology_df.loc[:cutoff_index + 2]
+            # Flag input group to Config class object for later use
+            Config.input_group = 1
         else:
             physiology_df_stub = physiology_df.loc[:cutoff_index]
 
         unique_subtypes = existing_neuron_groups['neuron_subtype'].unique()
         collect_subtype_dataframes_list = []
-        # pdb.set_trace()
+
         for neuron_subtype in unique_subtypes:
             # Get matching type
             neuron_type = existing_neuron_groups.groupby(['neuron_subtype']).get_group(neuron_subtype)['neuron_type'].values[0]
@@ -431,7 +432,6 @@ class Groups(Config):
         values_new = values_new.mask(Area_tot_pyram_index,other = Area_tot_pyram)
 
         return values_new
-
 
     def generate_cell_groups(self, area_object, requested_cell_types_and_proportions):
         '''
@@ -752,6 +752,8 @@ class Connections(Config):
     '''
 
     def __init__(self, area_object, group_object, use_all_csv_data):
+
+        # TÄHÄN JÄIT: KYTKE INPUT MUIHIN RYHMIIN; SIIRRÄ COMP GLOBAALIT YLÖS; HARKITSE SIISTIMISTÄ
         
         # Read data from files.
         # Read ni csv into dataframe
@@ -833,6 +835,31 @@ class Connections(Config):
         current_connection_index = start_index
         
         # Set 'receptor', 'pre_syn_idx', 'post_syn_idx', 'p'
+
+        # Input connections
+        if Config.input_group == 1:
+            # define connections_df for the input group
+            # TODO move from to layers to globals
+            input_connections_dict = {'FromLayer':0,'ToLayer':5,'p':1}
+            input_connections_df = pd.DataFrame(input_connections_dict, index=np.arange(1))
+            IN_type = excitatory_proportions_df.index[0] # get first neuron type as in type
+            primary_proportion_df = excitatory_proportions_df
+            # primary_proportion_dict = {'IN':1}
+            primary_proportion_df.loc[IN_type,'IN'] = 1
+            layerIdx2layerNames_dict[0] = 'IN'
+            # Prepend existing_neuron_groups_df with index 'INPUT', column 'neuron_subtype'='IN_SS'; 'layer_idx' = 0
+            top_row_df = pd.DataFrame(columns=existing_neuron_groups_df.columns, index=['INPUT'])
+            top_row_df['idx'] = [0] 
+            top_row_df['neuron_type'] = ['SS'] 
+            top_row_df['neuron_subtype'] = ['IN_SS'] 
+            top_row_df['layer_idx'] = [0]
+            prepended_neuron_groups_df = pd.concat([top_row_df, existing_neuron_groups_df])
+
+            syn_df, current_connection_index = self._set_connection_parameters(syn_df, 
+                prepended_neuron_groups_df, input_connections_df, primary_proportion_df,  
+                inhibitory_proportions_df, current_connection_index, layerIdx2layerNames_dict, 
+                layerNames2layerIdx_dict, requested_cell_types, receptor_type='ge')
+
         # Excitatory connections
         syn_df, current_connection_index = self._set_connection_parameters(syn_df, 
             existing_neuron_groups_df, excitatory_connections_df, excitatory_proportions_df,  
@@ -1348,7 +1375,7 @@ if __name__ == "__main__":
     # group_object.anatomy_config_df_new.to_excel(os.path.join(PATH_TO_CONFIG_FILES,anatomy_config_file_name[:-4] + suffix_for_new_files + '.xlsx'), header=False, index=False)
     # # For cxsystem we write this to json, too
     # group_object.anatomy_config_df_new.to_json(os.path.join(PATH_TO_CONFIG_FILES,anatomy_config_file_name[:-4] + suffix_for_new_files + '.json'))
-
+    
     Conn_new = Connections(V1, group_object, use_all_csv_data)
 
     # Write anatomy out
