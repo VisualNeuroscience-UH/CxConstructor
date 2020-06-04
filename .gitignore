@@ -62,6 +62,10 @@ build
 # Developer files
 test_notebooks/
 .ipynb_checkpoints/
+MacV1Buildup/config_files/*.xlsx
+MacV1Buildup/config_files/*_cxc.csv
+MacV1Buildup/config_files/*_test.csv
+MacV1Buildup/tables/#connection_csv_sublayer_to_table2_layer_mapping.csv
 
 # Output data files which may be big
 

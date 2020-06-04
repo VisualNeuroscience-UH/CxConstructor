@@ -2,7 +2,7 @@
 '''
 Construct macaque visual cortex model using existing configuration files.
 
-This module input your definitions after the if __name__ == "__main__":
+This module input your definitions MyConstructor
 and constructs model of macaque V1. It makes a query to neuroinfo csv data 
 and tables from Vanni et al Cerebral Cortex 2020. It uses these data to create
 cell groups and connections into anatomical and physiological csv files
@@ -23,6 +23,11 @@ import pandas as pd
 from cxsystem2.core.tools import  read_config_file
 
 import pdb
+
+
+###############################################
+##### GLOBAL CONSTANTS FOR CXCONSTRUCTOR ######
+###############################################
 
 # System-dependent constant paths
 ROOT_PATH = r'C:\Users\Simo\Laskenta\Git_Repos\CxConstructor\MacV1Buildup'
@@ -48,8 +53,13 @@ SYNAPSE_TYPE = 'Depressing'
 _CELLTYPES = np.array(['PC', 'SS', 'BC', 'MC', 'L1i', 'VPM', 'HH_I', 'HH_E', 'NDNEURON']) # Copied from CxSystem2\cxsystem2\core\physiology_reference.py class NeuronReference
 
 INPUT_LAYER_IDX = 0
-INPUT_LAYER_TARGET_LAYER = 'L4C'
+INPUT_LAYER_TARGET_LAYER = 'L4CA'
 INPUT_CONNECTION_PROBABILITY = 1.0
+
+
+##############################################
+################# MAIN CODE ##################
+##############################################
 
 
 class Config:
@@ -1217,15 +1227,10 @@ class Connections(Config):
         return connection_df_ni_names_unique
 
 
-def show_cortex():
-    '''
-    show_cortex
-    Visualize the neurons (and connections?) in 3D
-    visimpl?
-    '''    
-    pass
+###############################################
+########## END OF CXCONSTRUCTOR CODE ##########
+###############################################
 
-# ***************************************************************************
 if __name__ == "__main__":
     '''
     Start of user input
@@ -1257,7 +1262,7 @@ if __name__ == "__main__":
 
     '''
     # requested_layers=['L1', 'L23', 'L4A','L4B', 'L4CA', 'L4CB','L5','L6'] # You should be able start from L4CA or B alone for testing
-    requested_layers=['L1', 'L23', 'L4A','L4B', 'L4C','L5','L6'] # You should be able start from L4CA or B alone for testing
+    requested_layers=['L1', 'L23', 'L4A','L4B', 'L4CA','L5','L6'] # You should be able start from L4CA or B alone for testing
     # requested_layers=['L23', 'L4CA', 'L5','L6'] # You should be able start from L4CA or B alone for testing
     # requested_layers=['L23', 'L4CA', 'L5','L6'] # You should be able start from L4CA or B alone for testing
  
@@ -1270,44 +1275,31 @@ if __name__ == "__main__":
     # 'L4CA': [1, 0],
     # 'L5': [.5, .5], 
     # 'L6': [.5, .5]}
-    # inhibitory_proportions = {  
-    # 'L1': [1, 0, 0], 
-    # 'L23': [0, .5, .5], 
-    # 'L4A': [.33, .33, .33], 
-    # 'L4B': [.33, .33, .33], 
-    # 'L4C': [1, 0, 0],
-    # 'L5': [.33, .33, .33], 
-    # 'L6': [0, .5, .5]}
+    
     inhibitory_proportions = {  
     'L1': [1, 0], 
     'L23': [.5, .5], 
     'L4A': [.5, .5], 
     'L4B': [.5, .5], 
-    'L4C': [1, 0],
+    'L4CA': [1, 0],
     'L5': [.5, .5], 
     'L6': [.5, .5]}
 
     # Excitatory proportions are given by hand here. 
     # The list length for each layer must match the N types and should sum to approximately 1.
     # The layers must match the requested layers
-    # The SS type in L1 is just a pointlike excitatory neuron
     # excitatory_types = ['SS', 'PC1', 'PC2']
-    excitatory_types = ['SS','PC1'] # IT is one of th Allen excitatory types. SS = spiny stellate and this should exist in all physiological files
-    # excitatory_proportions = {} # Leaving this empty will produce 1/N types proportions for each layer if cell_type_data_source = ''
-    excitatory_proportions = {  
-    'L1': [1, 0], 
-    'L23': [0, 1], 
-    'L4A': [.5, .5], 
-    'L4B': [.5, .5], 
-    'L4C': [1, 0],
-    'L5': [0, 1], 
-    'L6': [.1, .9]}
-
-    # inhibitory_types = ['example1','example2','example3'] # Name example is used for construction. For simulation, these need to match the physiology cell type names
-    # inhibitory_proportions={}
-
-    # excitatory_types = ['example4'] 
-    # excitatory_proportions = {}
+    # excitatory_types = ['SS','PC1'] # IT is one of th Allen excitatory types. SS = spiny stellate and this should exist in all physiological files
+    excitatory_types = ['SS'] # IT is one of th Allen excitatory types. SS = spiny stellate and this should exist in all physiological files
+    excitatory_proportions = {} # Leaving this empty will produce 1/N types proportions for each layer if cell_type_data_source = ''
+    # excitatory_proportions = {  
+    # 'L1': [1, 0], 
+    # 'L23': [0, 1], 
+    # 'L4A': [.5, .5], 
+    # 'L4B': [.5, .5], 
+    # 'L4C': [1, 0],
+    # 'L5': [0, 1], 
+    # 'L6': [.1, .9]}
 
     # Read in anat csv to start with. Check for config_files folder for valid inputs.
     # If replace_existing_cell_groups flag is False, your groups will be added to current groups. This allows building system stepwise
@@ -1338,6 +1330,7 @@ if __name__ == "__main__":
     # you can use all csv data, including the sublayers and CO compartments.
     use_all_csv_data = True
     
+
     '''
     End of user input
     '''
@@ -1369,18 +1362,11 @@ if __name__ == "__main__":
     Config.table2_df = Config.get_neuroinformatics_data(TABLE2_DATA_FILENAME, set_index='layer')
     Config.use_all_csv_data = use_all_csv_data
 
-    # CxC = Config()
     V1 = Area(area_name=area_name, requestedVFradius=requestedVFradius, center_ecc=center_ecc, requested_layers=requested_layers)
 
     # Add anatomy and physiology config files to start with
     group_object = Groups(V1, requested_cell_types_and_proportions, cell_type_data_source, cell_type_data_folder_name, 
                 cell_type_data_file_name, request_monitors,requested_background_input)
-
-    # group_object.anatomy_config_df_new.to_csv(os.path.join(PATH_TO_CONFIG_FILES,anatomy_config_file_name[:-4] + suffix_for_new_files + '.csv'), header=False, index=False)
-    # # For debugging we write this to excel, too
-    # group_object.anatomy_config_df_new.to_excel(os.path.join(PATH_TO_CONFIG_FILES,anatomy_config_file_name[:-4] + suffix_for_new_files + '.xlsx'), header=False, index=False)
-    # # For cxsystem we write this to json, too
-    # group_object.anatomy_config_df_new.to_json(os.path.join(PATH_TO_CONFIG_FILES,anatomy_config_file_name[:-4] + suffix_for_new_files + '.json'))
     
     Conn_new = Connections(V1, group_object, use_all_csv_data)
 
