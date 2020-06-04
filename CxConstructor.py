@@ -53,7 +53,7 @@ SYNAPSE_TYPE = 'Depressing'
 _CELLTYPES = np.array(['PC', 'SS', 'BC', 'MC', 'L1i', 'VPM', 'HH_I', 'HH_E', 'NDNEURON']) # Copied from CxSystem2\cxsystem2\core\physiology_reference.py class NeuronReference
 
 INPUT_LAYER_IDX = 0
-INPUT_LAYER_TARGET_LAYER = 'L4CA'
+INPUT_LAYER_TARGET_LAYER = 'L4C'
 INPUT_CONNECTION_PROBABILITY = 1.0
 
 

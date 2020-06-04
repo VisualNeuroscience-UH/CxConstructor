@@ -1,21 +1,19 @@
 from CxConstructor import *
 
 '''
-Start of user input
 Copy and comment/uncomment examples/your own versions by need. If python gives exception, look first your own syntax below.
-'''
 
-area_name='V1' # Don't change this.
-requestedVFradius=.1 # Increasing this rapidly makes much more cells and increases the computational cost
-center_ecc=5 # Don't change this. This might be later replaced by 2D coordinates
+Note that you need to make a change in the curren (4.6.2020) version of CxSystem2 physiology_reference.py, line 85
+from:   self.output_neuron['dends_layer'] = self._comparts_tmp2
+to:     self.output_neuron['dends_layer'] = self._comparts_tmp1
 
-'''
 The proportion of inhibitory and excitatory neurons in distinct V1 layers will come from our review Table2.
 Below, you provide inhibitory and excitatory cell types and proportions when you have more than one type for each.
-Cell types are mandatory, and their names must match both Allen/HBP data table if these are used and physiology file cell type names
-Inhibitory and excitatory cell type proportions layerwise come either from  Allen/HBP data, 
-or you can define them by hand below. If left empty, 1/N cell types will be used for each layer.
+Cell types are mandatory, and their names must match 'PC', 'SS', 'BC', 'MC', 'L1i', 'VPM', 'HH_I', 'HH_E' or 'NDNEURON'
+Inhibitory and excitatory cell type proportions layerwise come later from  Allen/HBP data, 
+but now you need to define them by hand below. If left empty, 1/N cell types will be used for each layer.
 
+Ignore considerations below this point for now
 Later in an advanced version of the system, you can use the considerations below:
 Inhibitory neurons are divided into three groups in each layer, except in L1. In L1 we have limited data. The inh neurons will
 for sure be structurally simple. Whether we need a separate cell type for L1 is an open question. We could use the LAMP5 molecular marker as L1I 
@@ -27,9 +25,17 @@ For excitatory neurons we do not have HBP/Allen data to start with because only 
 pyramidal cells (PC) with apical dendrites and spiny stellate (SS) cells which are point-like.
 Each PC group in layers L2 to L6 are divided into two. The first has apical dendrite extending to L1 and the second to L23 (L4-5, or L4C (L6)
 see Lund_1991_JCompNeurol, Callaway_1996_VisNeurosci, Nassi_2007_Neuron, Nhan_2012_JCompNeurol, Wiser_1996_Jneurosci, Briggs_2016_Neuron
-
 '''
-requested_layers=['L1', 'L23', 'L4A','L4B', 'L4CA','L5','L6'] # You should be able start from L4CA or B alone for testing
+
+
+###############################################
+############# START OF USER INPUT #############
+###############################################
+
+requestedVFradius = .1 # Increasing this rapidly makes much more cells and increases the computational cost
+center_ecc = 5 # Don't change this. This might be later replaced by 2D coordinates
+
+requested_layers = ['L1', 'L23', 'L4A','L4B', 'L4C','L5','L6'] # You should be able start from L4CA or B alone for testing
 # requested_layers=['L1', 'L4C', 'L6'] # You should be able start from L4CA or B alone for testing
 
 # Here are some examples
@@ -65,7 +71,7 @@ excitatory_proportions = {
 'L23': [0, 1], 
 'L4A': [.5, .5], 
 'L4B': [.5, .5], 
-'L4CA': [1, 0],
+'L4C': [1, 0],
 'L5': [0, 1], 
 'L6': [.1, .9]}
 
@@ -104,6 +110,8 @@ use_all_csv_data = True
 ###############################################
 ############## END OF USER INPUT ##############
 ###############################################
+
+area_name = 'V1' # Don't change this.
 
 if cell_type_data_source == 'HBP':
     cell_type_data_folder_name='hbp_data'; cell_type_data_file_name='layer_download.json'
