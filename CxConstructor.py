@@ -47,13 +47,16 @@ N_SYNAPSES_PER_CONNECTION = 1
 SYNAPSE_TYPE = 'Depressing'
 _CELLTYPES = np.array(['PC', 'SS', 'BC', 'MC', 'L1i', 'VPM', 'HH_I', 'HH_E', 'NDNEURON']) # Copied from CxSystem2\cxsystem2\core\physiology_reference.py class NeuronReference
 
+INPUT_LAYER_IDX = 0
+INPUT_LAYER_TARGET_LAYER = 'L4C'
+INPUT_CONNECTION_PROBABILITY = 1.0
+
+
 class Config:
 
     '''
     This class contains general objects, concerning all areas and connections. It is here for general data and methods.
-    '''
-    # TODO Read all fixed tables to config object at init method
-    
+    '''    
     
     @classmethod
     def get_data_from_anat_config_df(cls, anat_df, datatype='G'):
@@ -839,20 +842,23 @@ class Connections(Config):
         # Input connections
         if Config.input_group == 1:
             # define connections_df for the input group
-            # TODO move from to layers to globals
-            input_connections_dict = {'FromLayer':0,'ToLayer':5,'p':1}
+            input_layer_idx = INPUT_LAYER_IDX
+            input_layer_target_layer = layerNames2layerIdx_dict[INPUT_LAYER_TARGET_LAYER] 
+            input_connection_probability = INPUT_CONNECTION_PROBABILITY
+            input_connections_dict = {  'FromLayer':input_layer_idx,
+                                        'ToLayer':input_layer_target_layer,
+                                        'p':input_connection_probability}
             input_connections_df = pd.DataFrame(input_connections_dict, index=np.arange(1))
-            IN_type = excitatory_proportions_df.index[0] # get first neuron type as in type
+            in_type = excitatory_proportions_df.index[0] # get first neuron type as in type
             primary_proportion_df = excitatory_proportions_df
-            # primary_proportion_dict = {'IN':1}
-            primary_proportion_df.loc[IN_type,'IN'] = 1
+            primary_proportion_df.loc[in_type,'IN'] = 1
             layerIdx2layerNames_dict[0] = 'IN'
             # Prepend existing_neuron_groups_df with index 'INPUT', column 'neuron_subtype'='IN_SS'; 'layer_idx' = 0
             top_row_df = pd.DataFrame(columns=existing_neuron_groups_df.columns, index=['INPUT'])
-            top_row_df['idx'] = [0] 
-            top_row_df['neuron_type'] = ['SS'] 
-            top_row_df['neuron_subtype'] = ['IN_SS'] 
-            top_row_df['layer_idx'] = [0]
+            top_row_df['idx'] = [0] # group index
+            top_row_df['neuron_type'] = [in_type] 
+            top_row_df['neuron_subtype'] = [f'IN_{in_type}'] 
+            top_row_df['layer_idx'] = [INPUT_LAYER_IDX]
             prepended_neuron_groups_df = pd.concat([top_row_df, existing_neuron_groups_df])
 
             syn_df, current_connection_index = self._set_connection_parameters(syn_df, 
