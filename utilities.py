@@ -45,10 +45,9 @@ def figsave(figurename='', myformat='png', suffix=''):
         figurename = filename + file_extension
 
     plt.savefig(figurename, dpi=None, facecolor='w', edgecolor='w',
-        orientation='portrait', papertype=None, format=myformat,
+        orientation='portrait', papertype=None, format=file_extension[1:],
         transparent=False, bbox_inches=None, pad_inches=0.1,
-        frameon=None, metadata=None)
-
+        metadata=None)
 
 def getData(filename):
     fi = open(filename, 'rb')
@@ -451,7 +450,7 @@ def showLatestSpatial(path='./',filename=None,sum_length=1, savefigname=''):
     filename = parsePath(path,filename, type='results')
 
     print(filename)
-    data = getData(os.path.join(path, filename))
+    data = getData(filename)
 
     # Visualize
     coords='w_coord'
