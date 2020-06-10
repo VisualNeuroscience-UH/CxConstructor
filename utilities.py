@@ -10,6 +10,46 @@ import datetime
 import pandas as pd
 import pdb
 
+def parsePath(path,filename, type='results'):
+    filename_out = None
+    if path is None:
+        path = './'
+        
+    if filename is None:
+        filename_out = _newest(path,type=type)
+    
+    if not filename_out:
+        filename_out = os.path.join(path,filename)
+    return filename_out
+
+def close():
+    plt.close('all')
+
+def figsave(figurename='', myformat='png', suffix=''):
+    
+    # Saves current figure to working dir
+
+    if myformat[0] == '.':
+        myformat=myformat[1:]
+
+    filename, file_extension = os.path.splitext(figurename)
+
+    filename = filename + suffix
+
+    if not file_extension:
+         file_extension = '.' + myformat
+
+    if not figurename:
+        figurename = 'MyFigure' + file_extension
+    else:
+        figurename = filename + file_extension
+
+    plt.savefig(figurename, dpi=None, facecolor='w', edgecolor='w',
+        orientation='portrait', papertype=None, format=myformat,
+        transparent=False, bbox_inches=None, pad_inches=0.1,
+        frameon=None, metadata=None)
+
+
 def getData(filename):
     fi = open(filename, 'rb')
     data_pickle = zlib.decompress(fi.read())
@@ -182,12 +222,10 @@ def _newest(path='./',type='connections'):
     # return fullfile
     return filename
 
-def showLatestConnections(path='./',filename=None, hist_from=None):
+def showLatestConnections(path='./',filename=None, hist_from=None, savefigname=''):
 
-    if filename is None:
-        filename = _newest(path,type='connections')
-    else:
-        filename = os.path.join(path, filename)
+    filename = parsePath(path,filename, type='connections')
+    
     print(filename)
     data = getData(filename)
 
@@ -212,12 +250,15 @@ def showLatestConnections(path='./',filename=None, hist_from=None):
     data4hist = np.squeeze(np.asarray(data[hist_from]['data'].todense().flatten()))
     data4hist_nozeros = np.ma.masked_equal(data4hist,0)
     axs[(n_rows * n_columns)-1].hist(data4hist_nozeros)
+    if savefigname:
+        figsave(figurename=savefigname)
+
     plt.show()
 
-def showLatestVm(path='./',filename=None):
+def showLatestVm(path='./',filename=None, savefigname=''):
 
-    if filename is None:
-        filename = _newest(path,type='results')
+    filename = parsePath(path,filename, type='results')
+
     print(filename)
     data = getData(filename)
     # Visualize
@@ -252,12 +293,15 @@ def showLatestVm(path='./',filename=None):
                         data['vm_all'][results]['vm'][time_interval[0]:time_interval[1],:])
         ax.set_title(results, fontsize=10)
 
+    if savefigname:
+        figsave(figurename=savefigname)
+
     plt.show()
 
-def showLatestG(path='./',filename=None):
+def showLatestG(path='./',filename=None, savefigname=''):
 
-    if filename is None:
-        filename = _newest(path,type='results')
+    filename = parsePath(path,filename, type='results')
+
     print(filename)
     data = getData(filename)
     # Visualize
@@ -289,12 +333,15 @@ def showLatestG(path='./',filename=None):
                      data['gi_soma_all'][results2]['gi_soma'][time_interval[0]:time_interval[1],0:-1:20])
         ax2.set_title(results2 + ' gi', fontsize=10)
 
+    if savefigname:
+        figsave(figurename=savefigname)
+
     plt.show()
 
-def showLatestI(path='./',filename=None):
+def showLatestI(path='./',filename=None, savefigname=''):
 
-    if filename is None:
-        filename = _newest(path,type='results')
+    filename = parsePath(path,filename, type='results')
+
     print(filename)
     data = getData(filename)
     # Visualize
@@ -348,9 +395,12 @@ def showLatestI(path='./',filename=None):
         I_total_mean_str = f'mean I = {I_total_mean:6.2f} nAmp'
         ax.text(0.05, 0.95, I_total_mean_str, fontsize=10, verticalalignment='top', transform=ax.transAxes)
 
+    if savefigname:
+        figsave(figurename=savefigname)
+
     plt.show()
 
-def getI(neuron_group,data):
+def _getI(neuron_group,data):
 
     # Extract connections from data dict
     # list_of_results_ge = [n for n in data['ge_soma_all'].keys() if 'NG' in n]
@@ -396,10 +446,10 @@ def getI(neuron_group,data):
         
     return I_total_mean, I_excitatory_mean, I_inhibitory_mean
 
-def showLatestSpatial(path='./',filename=None,sum_length=1):
+def showLatestSpatial(path='./',filename=None,sum_length=1, savefigname=''):
 
-    if filename is None:
-        filename = _newest(path,type='results')
+    filename = parsePath(path,filename, type='results')
+
     print(filename)
     data = getData(os.path.join(path, filename))
 
@@ -456,9 +506,12 @@ def showLatestSpatial(path='./',filename=None,sum_length=1):
     if np.mod(n_images,2):
         axs[-2].axis('off')
         axs[-1].axis('off')
+    if savefigname:
+        figsave(figurename=savefigname)
+
     plt.show()
 
-def showLatestASF(path='./',timestamp=None,sum_length=1, fixed_y_scale=True, data_type='spikes'):
+def showLatestASF(path='./',timestamp=None,sum_length=1, fixed_y_scale=True, data_type='spikes', savefigname=''):
     '''
     Show ASF curves for single value or for an array search across one independent variable.
     At the moment, no more than 1000 values are adviced for one search,
@@ -469,7 +522,7 @@ def showLatestASF(path='./',timestamp=None,sum_length=1, fixed_y_scale=True, dat
     assert data_type=='spikes' or data_type=='current', "Unknown data type, should be 'spikes' or 'current', aborting"
     
     if timestamp is None:
-        filename = _newest(path,type='results')
+        filename = parsePath(path,filename=None, type='results')
         today = str(datetime.date.today()).replace('-','')
         start_index = filename.find(today)
         end_index = start_index + 16
@@ -576,7 +629,7 @@ def showLatestASF(path='./',timestamp=None,sum_length=1, fixed_y_scale=True, dat
                 firing_frequency = np.mean(full_vector[neuron_indices]) / epoch_duration
                 ASF_dict[neuron_group][ASF_size, search_variable, trial] = firing_frequency
             elif data_type == 'current':
-                I_total_mean, I_excitatory_mean, I_inhibitory_mean = getI(neuron_group, data)
+                I_total_mean, I_excitatory_mean, I_inhibitory_mean = _getI(neuron_group, data)
                 ASF_dict[neuron_group][ASF_size, search_variable, trial, 0] = I_total_mean
                 ASF_dict[neuron_group][ASF_size, search_variable, trial, 1] = I_excitatory_mean
                 ASF_dict[neuron_group][ASF_size, search_variable, trial, 2] = I_inhibitory_mean *-1 ## Inverting inhibitory currents to positive
@@ -656,6 +709,9 @@ def showLatestASF(path='./',timestamp=None,sum_length=1, fixed_y_scale=True, dat
 
         handles, foo = ax1.get_legend_handles_labels()
         fig.legend(handles, labels, loc='lower right')
+        if savefigname:
+            figsave(figurename=savefigname, suffix=f'{search_variable_array[search_variable_index]}')
+
     plt.show()
 
 def createASFset(start_stim_radius=0.1,end_stim_radius=8,units='deg',Nsteps=5,show_positions=True):
