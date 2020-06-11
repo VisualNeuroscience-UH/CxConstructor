@@ -767,3 +767,5 @@ def createASFset(start_stim_radius=0.1,end_stim_radius=8,units='deg',Nsteps=5,sh
 
         # Save position files with compact names by calling saveSchwabeData
         saveSchwabeData(data_positions, key, dir_name='../connections')
+
+        
