@@ -558,21 +558,28 @@ def showLatestASF(path='./',timestamp=None,sum_length=1, fixed_y_scale=True, dat
         search_variable_array_length = 1
         trials_per_config =  int(metadata_df['Full path'].size / metadata_df['Dimension-1 Value'].unique().size)
 
-    assert 'act' in result_files_for_ASF[0], 'I was expecting "act" in filename. This might not be ASF data, aborting'
+    # assert 'act' in result_files_for_ASF[0], 'I was expecting "act" in filename. This might not be ASF data, aborting'
+    
+    contrast_types = np.array(['ON', 'OFF', 'ACT'])
+    contrast_type_idx = [contrast_type in result_files_for_ASF[0] for contrast_type in contrast_types]
+    contrast_type = contrast_types[np.array(contrast_type_idx)][0]
+    # pdb.set_trace()
+    assert contrast_type, 'I was expecting "on", "off" or "act" in filename. This might not be ASF data, aborting'
+
 
     #The sizes are extracted from filenames, so BE CAREFUL.
     # Assuming annulus data if filename begins with 'ANN'
     if result_files_for_ASF[0][:3]=='ANN':
-        assert result_files_for_ASF[0].count('act')==3, '''Annulus data should have "act" three times in results data filename ie 
-                                                           in the spike_times variable, aborting'''
+        assert  result_files_for_ASF[0].count(contrast_type)==3, '''Annulus data should have "act", "on" or "off" three times in results data filename ie 
+                                                                    in the spike_times variable, aborting'''
         filename_dict = {}
         for this_file in result_files_for_ASF:
-            relevant_substring = this_file[this_file.index('act'):this_file.index('.gz')]
+            relevant_substring = this_file[this_file.index(contrast_type):this_file.index('.gz')]
             try:
-                active_ranges = eval("np.array([[" + relevant_substring[3:].replace('act','],[').replace('-',',') + "]])")
+                active_ranges = eval("np.array([[" + relevant_substring[3:].replace(contrast_type,'],[').replace('-',',') + "]])")
             except:
                 relevant_substring = relevant_substring[:relevant_substring.index('_')] # 2-dim run puts _nextDimParmas to end
-                active_ranges = eval("np.array([[" + relevant_substring[3:].replace('act','],[').replace('-',',') + "]])")
+                active_ranges = eval("np.array([[" + relevant_substring[3:].replace(contrast_type,'],[').replace('-',',') + "]])")
 
             annulus_distance = (np.mean(active_ranges[0,:]) - active_ranges[1,1] + active_ranges[2,0] - np.mean(active_ranges[0,:])) / 2
             filename_dict[this_file] = annulus_distance
@@ -583,9 +590,9 @@ def showLatestASF(path='./',timestamp=None,sum_length=1, fixed_y_scale=True, dat
     elif result_files_for_ASF[0][:3]=='ASF':
         if trials_per_config==1:
             # Get ASF radius (SIC) from filenames: pick str btw 'act' and '-1', eval the difference, multiply by -1 to get it positive
-            filename_dict = {k:(-1 * eval(k[k.find('act') + 3 : k.find('-1.gz')]))/2 for k in result_files_for_ASF}
+            filename_dict = {k:(-1 * eval(k[k.find(contrast_type) + len(contrast_type) : k.find('-1.gz')]))/2 for k in result_files_for_ASF}
         elif trials_per_config>1:
-            filename_dict = {k:(-1 * eval(k[k.find('act') + 3 : k.find('-1_')]))/2 for k in result_files_for_ASF}
+            filename_dict = {k:(-1 * eval(k[k.find(contrast_type) + len(contrast_type) : k.find('-1_')]))/2 for k in result_files_for_ASF}
         filename_array_sorted = metadata_df['Full path'].values
 
     else:
@@ -767,5 +774,3 @@ def createASFset(start_stim_radius=0.1,end_stim_radius=8,units='deg',Nsteps=5,sh
 
         # Save position files with compact names by calling saveSchwabeData
         saveSchwabeData(data_positions, key, dir_name='../connections')
-
-        
