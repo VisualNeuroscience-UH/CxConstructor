@@ -11,10 +11,12 @@ from utilities import getData, figsave
 import pdb
     
 class InternalModel:
-    
-    root_path = r'C:\Users\Simo\Laskenta\Models\SchwabeModel\data_pikkuveljeltä\ASF_ConSearch'
-    # filename = 'ASF_ConSearch_results_20200320_1630053_spike_times100Hact65-96-1_custom_weight24nS_001.gz'
-    filename = 'ASF_ConSearch_results_20200320_1630053_spike_times100Hact65-96-1_custom_weight12nS_009.gz'
+    if sys.platform is 'linux':
+        root_path = r'/opt2/Laskenta_ssd/Models/SchwabeModel/ASF_cont_bio'
+    elif sys.platform.startswith('win'):
+        root_path = r'C:\Users\Simo\Laskenta\Models\SchwabeModel\data_pikkuveljeltä\ASF_ConSearch'
+
+    filename = 'ASF_cont_bio_results_20200617_1352495_spike_times100HON65-96-1_custom_weight24nS_000.gz'
     ng_name = 'NG1_SS_L2'
     input_group_prefix = 'NG0'
     myformat = 'eps'

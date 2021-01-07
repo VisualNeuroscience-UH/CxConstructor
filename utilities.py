@@ -644,7 +644,6 @@ def showLatestASF(path='./',timestamp=None,sum_length=1, fixed_y_scale=True, dat
     contrast_types = np.array(['ON', 'OFF', 'ACT'])
     contrast_type_idx = [contrast_type in result_files_for_ASF[0] for contrast_type in contrast_types]
     contrast_type = contrast_types[np.array(contrast_type_idx)][0]
-    # pdb.set_trace()
     assert contrast_type, 'I was expecting "on", "off" or "act" in filename. This might not be ASF data, aborting'
 
 
