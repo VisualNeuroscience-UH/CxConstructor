@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import utilities as ut
 
-TÄHÄN JÄIT. TEE KUVA JOSSA ROWS ON NG JA COLS ON PARAMS
+# TÄHÄN JÄIT. TEE KUVA JOSSA ROWS ON NG JA COLS ON PARAMS
 
 class showFigure:
 

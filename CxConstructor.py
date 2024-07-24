@@ -30,7 +30,7 @@ import pdb
 ###############################################
 
 # System-dependent constant paths
-ROOT_PATH = r'C:\Users\Simo\Laskenta\Git_Repos\CxConstructor\MacV1Buildup'
+ROOT_PATH = r'/opt2/Git_Repos/CxConstructor/MacV1Buildup'
 PATH_TO_TABLES = os.path.join(ROOT_PATH, 'tables')
 PATH_TO_NI_CSV = os.path.join(ROOT_PATH, 'ni_csv_copy')
 PATH_TO_CONFIG_FILES = os.path.join(ROOT_PATH, 'config_files')
@@ -205,32 +205,36 @@ class Area(Config):
         layer_name_mapping_df = layer_name_mapping_df.join(pd.DataFrame(columns=['requested_layers']))
         layer_name_mapping_df_full = layer_name_mapping_df
 
+        # Create an empty list to store new rows
+        new_rows = []
+        new_rows_full = []
+
         # Loop through requested layers
         for current_layer_requested_idx, current_layer_requested in enumerate(requested_layers):
-
-            # Loop through layer_name_mapping_df_orig
-            for index, row in layer_name_mapping_df_orig.iterrows():
+            # Filter rows where the requested layer is in search_columns
+            matching_rows = layer_name_mapping_df_orig[layer_name_mapping_df_orig[search_columns].isin([current_layer_requested]).any(axis=1)]
+            
+            for _, row in matching_rows.iterrows():
+                # Check if current csv_layer is already accounted for
+                if set(row[search_columns].values).isdisjoint(layer_name_mapping_df['csv_layers'].values):
+                    new_row = row.copy()
+                    new_row['layer_idx'] = current_layer_requested_idx + 1
+                    new_row['requested_layers'] = current_layer_requested
+                    new_rows.append(new_row)
                 
-                # Is requested layer in this row's search_columns?
-                if current_layer_requested in row[search_columns].values:
-                    
-                    # Check if current csv_layer is already accounted for: 
-                    #   are any of the down mapping column names (row) of the current row 
-                    #   already in the csv_layers column of the layer_name_mapping_df?
+                # For full csv mapping
+                new_row_full = row.copy()
+                new_row_full['layer_idx'] = current_layer_requested_idx + 1
+                new_row_full['requested_layers'] = current_layer_requested
+                new_rows_full.append(new_row_full)
 
-                    #   if set does not change (no matching names in the csv_layers column), 
-                    #   append row to layer_name_mapping_df, otherwise continue
-                    if (set(row[search_columns].values) - set(layer_name_mapping_df['csv_layers'].values)) == set(row[search_columns].values):
-                        layer_name_mapping_df = layer_name_mapping_df.append(row)
-                        # Add layer_idx to last row
-                        layer_name_mapping_df.loc[index,'layer_idx'] = current_layer_requested_idx + 1
-                        layer_name_mapping_df.loc[index,'requested_layers'] = current_layer_requested
-                
-                    # All layers are included in full for full csv mapping
-                    layer_name_mapping_df_full = layer_name_mapping_df_full.append(row)
-                    layer_name_mapping_df_full.loc[index,'layer_idx'] = current_layer_requested_idx + 1
-                    layer_name_mapping_df_full.loc[index,'requested_layers'] = current_layer_requested
+        # Concatenate new rows to the existing DataFrames
+        if new_rows:
+            layer_name_mapping_df = pd.concat([layer_name_mapping_df, pd.DataFrame(new_rows)], ignore_index=True)
 
+        if new_rows_full:
+            layer_name_mapping_df_full = pd.concat([layer_name_mapping_df_full, pd.DataFrame(new_rows_full)], ignore_index=True)
+            
         # Set layer_idx to integer type
         layer_name_mapping_df['layer_idx'] = layer_name_mapping_df['layer_idx'].astype('int32')
         layer_name_mapping_df_full['layer_idx'] = layer_name_mapping_df_full['layer_idx'].astype('int32')
@@ -365,28 +369,31 @@ class Groups(Config):
         for neuron_subtype in unique_subtypes:
             # Get matching type
             neuron_type = existing_neuron_groups.groupby(['neuron_subtype']).get_group(neuron_subtype)['neuron_type'].values[0]
-
-            if neuron_type in PointNeurons_df.columns: 
+            
+            if neuron_type in PointNeurons_df.columns:
                 keys = PointNeurons_df['Key']
                 values = PointNeurons_df[neuron_type]
             elif neuron_type in CompartmentalNeurons_df.columns:
                 keys = CompartmentalNeurons_df['Key']
-                # values = CompartmentalNeurons_df[neuron_type]
                 values = self._get_compartmental_values(keys, CompartmentalNeurons_df[neuron_type], neuron_subtype)
             elif neuron_type.startswith('PC'):
                 keys = CompartmentalNeurons_df['Key']
-                # values = CompartmentalNeurons_df['PC']
                 values = self._get_compartmental_values(keys, CompartmentalNeurons_df['PC'], neuron_subtype)
             else:
                 raise NotImplementedError('neuron_type not recognized, requested types do not match neuron_group_ephys_templates? Aborting...')
-
+            
             # Create subtype df
             data = [[neuron_subtype], keys.values.tolist(), values.values.tolist()]
             subtype_ephys_df = pd.DataFrame(data).T
-            # Append empty row to the end of df
-            subtype_ephys_df = subtype_ephys_df.append(pd.Series(), ignore_index=True)
-            # => append to list
+            
+            # Add an empty row at the end of the DataFrame
+            subtype_ephys_df = pd.concat([subtype_ephys_df, pd.DataFrame([[None, None, None]],
+                                                        columns=subtype_ephys_df.columns)],
+                                        ignore_index=True)
+            
+            # Add to list
             collect_subtype_dataframes_list.append(subtype_ephys_df)
+            
         all_subtype_ephys_df = pd.concat(collect_subtype_dataframes_list,ignore_index=True)    
         # Append to physiology_df_stub
         physiology_df_with_subgroups = pd.concat([physiology_df_stub, all_subtype_ephys_df],ignore_index=True)
@@ -996,7 +1003,7 @@ class Connections(Config):
                         post_syn_type_df_requested_cell_types['Presynaptic Cell Types'] == 
                         pre_type,'Postsynaptic Cell Weights'] 
                     allowed_weights_list = self.pd_string_value2list_of_strings(allowed_weights) 
-                    weight_pretype2posttype = np.float(allowed_weights_list[matching_idx])
+                    weight_pretype2posttype = float(allowed_weights_list[matching_idx])
 
                     if post_type == 'PC':
                         postsyn_ad = ''
@@ -1020,10 +1027,10 @@ class Connections(Config):
                             weight_pretype2postcomp = values[comp_index]
                         elif postsyn_ad == 'apicalProx':
                             comp_index = 3
-                            weight_pretype2postcomp = np.float(current_pre_type_post_comp_distribution_list[comp_index])
+                            weight_pretype2postcomp = float(current_pre_type_post_comp_distribution_list[comp_index])
                         elif postsyn_ad == 'apicalDist':
                             comp_index = 4
-                            weight_pretype2postcomp = np.float(current_pre_type_post_comp_distribution_list[comp_index])
+                            weight_pretype2postcomp = float(current_pre_type_post_comp_distribution_list[comp_index])
                         else:
                             raise NotImplementedError('postsyn_ad not caught at _set_connection_parameters')
                         
