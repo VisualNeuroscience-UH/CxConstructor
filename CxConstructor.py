@@ -72,8 +72,8 @@ class Config:
     def get_data_from_anat_config_df(cls, anat_df, datatype='G'):
 
         # Get and set column names for neuron groups
-        data_columns = anat_df.loc[anat_df.groupby([0]).get_group(datatype).index[0]-1,:].values
-        neuron_groups_df = anat_df.groupby([0]).get_group(datatype)
+        data_columns = anat_df.loc[anat_df.groupby([0]).get_group((datatype,)).index[0]-1,:].values
+        neuron_groups_df = anat_df.groupby([0]).get_group((datatype,))
         neuron_groups_df.columns = data_columns
 
         return neuron_groups_df, data_columns
@@ -230,11 +230,22 @@ class Area(Config):
 
         # Concatenate new rows to the existing DataFrames
         if new_rows:
-            layer_name_mapping_df = pd.concat([layer_name_mapping_df, pd.DataFrame(new_rows)], ignore_index=True)
-
-        if new_rows_full:
-            layer_name_mapping_df_full = pd.concat([layer_name_mapping_df_full, pd.DataFrame(new_rows_full)], ignore_index=True)
+            new_df = pd.DataFrame(new_rows)
+            # Remove empty or all-NA columns from the new DataFrame
+            new_df = new_df.dropna(axis=1, how='all')
             
+            if not new_df.empty:
+                # Ensure dtypes match between existing and new DataFrames
+                for col in new_df.columns:
+                    if col in layer_name_mapping_df.columns:
+                        new_df[col] = new_df[col].astype(layer_name_mapping_df[col].dtype)
+                
+                # Concatenate with a list comprehension to handle missing columns
+                layer_name_mapping_df = pd.concat([
+                    df[[col for col in df.columns if col in layer_name_mapping_df.columns or col in new_df.columns]]
+                    for df in [layer_name_mapping_df, new_df]
+                ], ignore_index=True)
+                
         # Set layer_idx to integer type
         layer_name_mapping_df['layer_idx'] = layer_name_mapping_df['layer_idx'].astype('int32')
         layer_name_mapping_df_full['layer_idx'] = layer_name_mapping_df_full['layer_idx'].astype('int32')
@@ -368,7 +379,7 @@ class Groups(Config):
 
         for neuron_subtype in unique_subtypes:
             # Get matching type
-            neuron_type = existing_neuron_groups.groupby(['neuron_subtype']).get_group(neuron_subtype)['neuron_type'].values[0]
+            neuron_type = existing_neuron_groups[existing_neuron_groups['neuron_subtype'] == neuron_subtype]['neuron_type'].values[0]
             
             if neuron_type in PointNeurons_df.columns:
                 keys = PointNeurons_df['Key']
@@ -483,7 +494,7 @@ class Groups(Config):
         # Get starting index for cell groups and row indices for anat df
         if self.replace_existing_cell_groups:
             start_cell_group_index = 1 # Reserve 0 for input group
-            start_index = anatomy_config_df.groupby([0]).get_group('G').index[0]
+            start_index = anatomy_config_df[anatomy_config_df[0] == 'G'].index[0]
         else:
             start_cell_group_index = int(existing_neuron_groups['idx'].values[-1]) + 1
             start_index = anatomy_config_df.groupby([0]).get_group('G').index[-1] + 1
@@ -568,7 +579,7 @@ class Groups(Config):
         NG_df.columns = anatomy_config_df.columns
 
         # Get end of cell groups index for slicing original anat df
-        end_index = anatomy_config_df.groupby([0]).get_group('G').index[-1] + 1
+        end_index = anatomy_config_df[anatomy_config_df[0] == 'G'].index[-1] + 1
         anatomy_config_df_beginning = anatomy_config_df.iloc[:start_index,:] 
         anatomy_config_df_end = anatomy_config_df.iloc[end_index:,:] 
         anatomy_config_df_new = pd.concat([anatomy_config_df_beginning, NG_df, anatomy_config_df_end], ignore_index=True)
@@ -584,7 +595,7 @@ class Groups(Config):
         assert layer in pc_ad_map_df.index.values, 'Requested layer not found in PC apical dendrite map. Create matching entry to PC_apical_dendrites.xlsx'
         pc_ad_map_df_row_s = pc_ad_map_df.loc[layer]
         # Map current group to PC1 or PC2
-        if current_group is 'PC':
+        if current_group == 'PC':
             ad_group = 'PC1'
         else: 
             assert current_group in pc_ad_map_df_row_s.index.values, 'PC group name not found in PC_apical_dendrites.xlsx for current layer'
@@ -733,8 +744,16 @@ class Groups(Config):
         '''
         N_types = len(requested_types)
         proportions = 1/N_types
-        proportions_df = pd.DataFrame(index=requested_types, columns=requested_layers).fillna(proportions)
 
+        pd.set_option('future.no_silent_downcasting', True)
+        # Create the DataFrame
+        proportions_df = pd.DataFrame(index=requested_types, columns=requested_layers)
+
+        # Fill NA values without downcasting
+        proportions_df = proportions_df.astype(object).fillna(proportions)
+
+        # Infer proper dtypes
+        proportions_df = proportions_df.infer_objects()
         return proportions_df
 
     def get_proportions_df(self, EIflag, proportions, types, requested_layers, cell_type_data_source, cell_type_data_folder_name, cell_type_data_file_name):
@@ -828,7 +847,7 @@ class Connections(Config):
 
         # Get starting index for connections and row indices for anat df
         if self.replace_existing_cell_groups:
-            start_index = anatomy_config_df_new_groups.groupby([0]).get_group('S').index[0]
+            start_index = anatomy_config_df_new_groups[anatomy_config_df_new_groups[0] == 'S'].index[0]
         else:
             start_index = anatomy_config_df_new_groups.groupby([0]).get_group('S').index[-1] + 1
 
@@ -1109,7 +1128,7 @@ class Connections(Config):
         use_all_csv_data = self.use_all_csv_data
 
         # Select area
-        connection_df_ni_names = ni_df.groupby(['FromArea']).get_group(area_name)
+        connection_df_ni_names = ni_df.groupby(['FromArea']).get_group((area_name,))
 
         # Drop unnecessary area columns
         connection_df_ni_names = connection_df_ni_names.drop(columns=['FromArea', 'ToArea'])

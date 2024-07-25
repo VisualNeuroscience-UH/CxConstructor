@@ -8,8 +8,8 @@ import utilities as ut
 class showFigure:
 
     figure_size = (4,6)
-    path_to_data = '/opt3/CxSimoWorkspace/Grossberg'
-    filename = 'Grossberg_results_20200630_1710246.gz'
+    path_to_data = '/home/simo/CxPytestWorkspace/sim_pytest'
+    filename = 'sim_pytest_results_20240725_0940002.gz'
 
     def __init__(self, vm=True, raster=True, spectrum=True, coherence=True, transfer_entropy=True):
 
