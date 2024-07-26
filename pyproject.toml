@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "cxconstructor"
+version = "0.1.0"
+description = ""
+authors = ["simo <simo.vanni@helsinki.fi>"]
+license = "The MIT License"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+openpyxl = "^3.1.5"
+numpy = "^2.0.1"
+matplotlib = "^3.9.1"
+scipy = "^1.14.0"
+pandas = "^2.2.2"
+cxsystem2 = {path = "/opt2/Git_Repos/CxSystem2"}
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
