@@ -10,9 +10,9 @@ from cxsystem2.core.tools import write_to_file as wtf
 from brian2.units import *
 import datetime
 import pandas as pd
-import elephant as el
-from neo.core import AnalogSignal
-import quantities as pq
+# import elephant as el
+# from neo.core import AnalogSignal
+# import quantities as pq
 import pdb
 
 def parsePath(path,filename, type='results'):
@@ -529,67 +529,67 @@ def showLatestSpatial(path='./',filename=None,sum_length=1, savefigname=''):
 
     plt.show()
 
-def showLatestSpectra(path='./',filename=None, savefigname=''):
+# def showLatestSpectra(path='./',filename=None, savefigname=''):
 
-    filename = parsePath(path,filename, type='results')
+#     filename = parsePath(path,filename, type='results')
 
-    print(filename)
-    data = getData(filename)
+#     print(filename)
+#     data = getData(filename)
 
-    # Visualize
-    coords='w_coord'
-    # Extract connections from data dict
-    list_of_results = [n for n in data['spikes_all'].keys() if 'NG' in n]
+#     # Visualize
+#     coords='w_coord'
+#     # Extract connections from data dict
+#     list_of_results = [n for n in data['spikes_all'].keys() if 'NG' in n]
 
-    print(list_of_results)
-    n_images=len(list_of_results)
-    n_columns = 2
-    nbins=400
-    duration = data['runtime']
-    bar_width = duration / nbins
-    freqCutoff = 200 # Hz
-    ylims=np.array([-18.4,18.4])
-    n_rows = int(np.ceil(n_images/n_columns))
+#     print(list_of_results)
+#     n_images=len(list_of_results)
+#     n_columns = 2
+#     nbins=400
+#     duration = data['runtime']
+#     bar_width = duration / nbins
+#     freqCutoff = 200 # Hz
+#     ylims=np.array([-18.4,18.4])
+#     n_rows = int(np.ceil(n_images/n_columns))
 
-    width_ratios = np.array([2,2])
+#     width_ratios = np.array([2,2])
 
-    fig, axs = plt.subplots(n_rows * 2, n_columns, gridspec_kw={'width_ratios': width_ratios})
-    axs = axs.flat
+#     fig, axs = plt.subplots(n_rows * 2, n_columns, gridspec_kw={'width_ratios': width_ratios})
+#     axs = axs.flat
 
-    for ax1, results in zip(axs[0:-1:2],list_of_results):
-        # im = ax1.scatter(data['spikes_all'][results]['t'], data['spikes_all'][results]['i'],s=1)
-        counts, bins = np.histogram(data['spikes_all'][results]['t']/second, range=[0,duration], bins=nbins)
-        Nneurons = data['number_of_neurons'][results]
-        firing_rates = counts * (nbins / (duration * Nneurons))
-        im = ax1.bar(bins[:-1], firing_rates, width=bar_width)
-        ax1.set_title(results, fontsize=10)
+#     for ax1, results in zip(axs[0:-1:2],list_of_results):
+#         # im = ax1.scatter(data['spikes_all'][results]['t'], data['spikes_all'][results]['i'],s=1)
+#         counts, bins = np.histogram(data['spikes_all'][results]['t']/second, range=[0,duration], bins=nbins)
+#         Nneurons = data['number_of_neurons'][results]
+#         firing_rates = counts * (nbins / (duration * Nneurons))
+#         im = ax1.bar(bins[:-1], firing_rates, width=bar_width)
+#         ax1.set_title(results, fontsize=10)
 
-    for ax2, results in zip(axs[1:-1:2],list_of_results):
-        try:
-            Vms=data['vm_all'][results]['vm']
-        except:
-            continue
-        sigarr = AnalogSignal(Vms, units='mV', sampling_rate=10000*pq.Hz)
-        freqs, psd = el.spectral.welch_psd(sigarr, n_segments=8, len_segment=None, frequency_resolution=None, fs=10000, nfft=None, scaling='density', axis=- 1)
+#     for ax2, results in zip(axs[1:-1:2],list_of_results):
+#         try:
+#             Vms=data['vm_all'][results]['vm']
+#         except:
+#             continue
+#         sigarr = AnalogSignal(Vms, units='mV', sampling_rate=10000*pq.Hz)
+#         freqs, psd = el.spectral.welch_psd(sigarr, n_segments=8, len_segment=None, frequency_resolution=None, fs=10000, nfft=None, scaling='density', axis=- 1)
         
-        # Cut to desired freq range
-        freqs_for_plotting = freqs[freqs < freqCutoff]
-        psd_for_plotting = psd[:,freqs < freqCutoff]
+#         # Cut to desired freq range
+#         freqs_for_plotting = freqs[freqs < freqCutoff]
+#         psd_for_plotting = psd[:,freqs < freqCutoff]
 
-        # Calculate mean psd
-        psd_for_plotting_mean = np.mean(psd_for_plotting, axis=0)
+#         # Calculate mean psd
+#         psd_for_plotting_mean = np.mean(psd_for_plotting, axis=0)
  
-        ax2.plot(freqs_for_plotting, psd_for_plotting.T, color='gray', linewidth=.25)
-        ax2.plot(freqs_for_plotting, psd_for_plotting_mean, color='black', linewidth=1)
+#         ax2.plot(freqs_for_plotting, psd_for_plotting.T, color='gray', linewidth=.25)
+#         ax2.plot(freqs_for_plotting, psd_for_plotting_mean, color='black', linewidth=1)
 
-    # Shut down last pair if uneven n images
-    if np.mod(n_images,2):
-        axs[-2].axis('off')
-        axs[-1].axis('off')
-    if savefigname:
-        figsave(figurename=savefigname)
+#     # Shut down last pair if uneven n images
+#     if np.mod(n_images,2):
+#         axs[-2].axis('off')
+#         axs[-1].axis('off')
+#     if savefigname:
+#         figsave(figurename=savefigname)
 
-    plt.show()
+#     plt.show()
 
 def showLatestASF(path='./',timestamp=None,sum_length=1, fixed_y_scale=True, data_type='spikes', savefigname=''):
     '''
